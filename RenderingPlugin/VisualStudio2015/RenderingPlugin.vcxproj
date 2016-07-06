@@ -73,6 +73,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <CustomBuildAfterTargets>PostBuildEvent</CustomBuildAfterTargets>
+    <CustomBuildBeforeTargets>PostBuildEvent</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
@@ -81,6 +83,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <CustomBuildAfterTargets>PostBuildEvent</CustomBuildAfterTargets>
+    <CustomBuildBeforeTargets>PostBuildEvent</CustomBuildBeforeTargets>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -163,6 +167,16 @@ copy /Y "$(TargetDir)SimplePixelShader.cso" "%TARGET_SHADER_PATH%SimplePixelShad
 ENDLOCAL
 </Command>
     </PostBuildEvent>
+    <CustomBuildStep>
+      <Command>echo "COPYING" &amp; del "$(ProjectDir)..\..\UnityProject\Assets\Plugins\x86_64\$(TargetName).dll" &amp; copy "$(TargetPath)" "$(ProjectDir)..\..\UnityProject\Assets\Plugins\x86_64\"</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Copying DLL to Unity project folder</Message>
+      <Outputs>$(ProjectDir)..\..\UnityProject\$(TargetName).dll</Outputs>
+    </CustomBuildStep>
+    <FxCompile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+    </FxCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -251,8 +265,19 @@ copy /Y "$(TargetDir)SimplePixelShader.cso" "%TARGET_SHADER_PATH%SimplePixelShad
 ENDLOCAL
 </Command>
     </PostBuildEvent>
+    <CustomBuildStep>
+      <Command>echo "COPYING" &amp; del "$(ProjectDir)..\..\UnityProject\Assets\Plugins\x86_64\$(TargetName).dll" &amp; copy "$(TargetPath)" "$(ProjectDir)..\..\UnityProject\Assets\Plugins\x86_64\"</Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>Copying DLL to Unity project folder</Message>
+      <Outputs>$(ProjectDir)..\..\UnityProject\$(TargetName).dll</Outputs>
+    </CustomBuildStep>
+    <FxCompile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+    </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\d3d_shader_compile\d3d_compile_shader.cpp" />
     <ClCompile Include="..\GL\glew.c" />
     <ClCompile Include="..\RenderingPlugin.cpp" />
   </ItemGroup>

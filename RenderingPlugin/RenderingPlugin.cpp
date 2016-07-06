@@ -42,7 +42,9 @@
 #endif
 
 typedef void (*FuncPtr)( const char * );
-FuncPtr Debug;
+FuncPtr _DebugFunc = nullptr;
+#define Debug(m) do { if (_DebugFunc) _DebugFunc(m); } while(0);
+
 // --------------------------------------------------------------------------
 // Helper utilities
 
@@ -95,6 +97,7 @@ int printOglError(const char *file, int line) {
 static float g_Time;
 
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTimeFromUnity (float t) { g_Time = t; }
+
 
 
 
@@ -182,6 +185,8 @@ static void DoEventGraphicsDeviceD3D12(UnityGfxDeviceEventType eventType);
 #if SUPPORT_OPENGL_UNIFIED
 static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType);
 #endif
+
+
 
 static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
 {
@@ -441,16 +446,15 @@ static bool EnsureD3D11ResourcesAreCreated()
 	LoadFileIntoBuffer(vertexShaderPath, vertexShader);
 	LoadFileIntoBuffer(fragmentShaderPath, pixelShader);
 
-	if (vertexShader.size() > 0 && pixelShader.size() > 0)
-	{
+	if (vertexShader.size() > 0 && pixelShader.size() > 0) {
 		hr = g_D3D11Device->CreateVertexShader(&vertexShader[0], vertexShader.size(), nullptr, &g_D3D11VertexShader);
-		if (FAILED(hr)) DebugLog("Failed to create vertex shader.\n");
+		if (FAILED(hr)) Debug("Failed to create vertex shader.\n");
 		hr = g_D3D11Device->CreatePixelShader(&pixelShader[0], pixelShader.size(), nullptr, &g_D3D11PixelShader);
-		if (FAILED(hr)) DebugLog("Failed to create pixel shader.\n");
+		if (FAILED(hr)) Debug("Failed to create pixel shader.\n");
 	}
 	else
 	{
-		DebugLog("Failed to load vertex or pixel shader.\n");
+		Debug("Failed to load vertex or pixel shader.\n");
 	}
 	// input layout
 	if (g_D3D11VertexShader && vertexShader.size() > 0)
@@ -1154,12 +1158,54 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 extern "C" {
 
-UNITY_INTERFACE_EXPORT  void SetDebugFunction( FuncPtr fp )
+UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp)
 {
-    Debug = fp;
+    _DebugFunc = fp;
+	if (fp) {
+		_DebugFunc("Debug function set");
+		return 11;
+	}
+	else {
+		return 13;
+	}
 }
 
-UNITY_INTERFACE_EXPORT void SetShaderSource(const char* source) {
+UNITY_INTERFACE_EXPORT void SetShaderSource(const char* pixelShader, const char* vertexShader) {
+
 }
+
+static char buf[2048];
+extern "C"  UNITY_INTERFACE_EXPORT  const char* GetDebugInfo() {
+	
+#define WAT(m) do { snprintf(buf, 2048, "%s", m); return buf; } while (0);
+
+#if SUPPORT_D3D9
+		if (s_DeviceType == kUnityGfxRendererD3D9)
+			WAT("D3D9");
+#endif
+#if SUPPORT_D3D11
+		if (s_DeviceType == kUnityGfxRendererD3D11)
+			WAT("D3D11");
+#endif
+#if SUPPORT_D3D12
+		if (s_DeviceType == kUnityGfxRendererD3D12)
+			WAT("D3D12");
+#endif
+#if SUPPORT_OPENGL_LEGACY
+		// OpenGL 2 legacy case (deprecated)
+		if (s_DeviceType == kUnityGfxRendererOpenGL)
+			WAT("OpenGL 2 Legacy");
+#endif
+#if SUPPORT_OPENGL_UNIFIED
+		// OpenGL ES / core case
+		if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
+			s_DeviceType == kUnityGfxRendererOpenGLES30 ||
+			s_DeviceType == kUnityGfxRendererOpenGLCore)
+			WAT("OpenGL Unified");
+#endif
+
+	WAT("UNKNOWN DEVICE");
+}
+	
 
 }

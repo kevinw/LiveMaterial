@@ -3,11 +3,13 @@
 	#define UNITY_GLES_RENDERER
 #endif
 
+//#define LIVE_RELOAD
 
 using UnityEngine;
 using System;
 using System.Collections;
 using System.Runtime.InteropServices;
+
 
 
 
@@ -20,26 +22,34 @@ public class UseRenderingPlugin : MonoBehaviour
 	    Debug.Log("[plugin] " + str);
 	}
 
-	// Native plugin rendering events are only called if a plugin is used
-	// by some script. This means we have to DllImport at least
-	// one function in some active script.
-	// For this example, we'll call into plugin's SetTimeFromUnity
-	// function and pass the current time so the plugin can animate.
+#if LIVE_RELOAD
+    delegate void SetTimeFromUnity(float t);
+    delegate int SetDebugFunction(IntPtr fp);
+#if UNITY_GLES_RENDERER
+	delegate void SetTextureFromUnity(System.IntPtr texture, int w, int h);
+#else
+    delegate void SetTextureFromUnity(IntPtr texture);
+#endif
+    delegate void SetUnityStreamingAssetsPath([MarshalAs(UnmanagedType.LPStr)] string path);
+    delegate IntPtr GetRenderEventFunc();
+    delegate IntPtr GetDebugInfo();
+#else
+
+
+#if UNITY_IPHONE && !UNITY_EDITOR
+	[DllImport ("__Internal")]
+#else
+    [DllImport ("RenderingPlugin")]
+#endif
+	private static extern void SetTimeFromUnity(float t);
+
 
 #if UNITY_IPHONE && !UNITY_EDITOR
 	[DllImport ("__Internal")]
 #else
 	[DllImport ("RenderingPlugin")]
 #endif
-	private static extern void SetTimeFromUnity(float t);
-
-
-	#if UNITY_IPHONE && !UNITY_EDITOR
-	[DllImport ("__Internal")]
-#else
-	[DllImport ("RenderingPlugin")]
-#endif
-	public static extern void SetDebugFunction( IntPtr fp );
+	public static extern int SetDebugFunction( IntPtr fp );
 
 
 	// We'll also pass native pointer to a texture in Unity.
@@ -52,7 +62,7 @@ public class UseRenderingPlugin : MonoBehaviour
 #if UNITY_GLES_RENDERER
 	private static extern void SetTextureFromUnity(System.IntPtr texture, int w, int h);
 #else
-	private static extern void SetTextureFromUnity(System.IntPtr texture);
+	private static extern void SetTextureFromUnity(IntPtr texture);
 #endif
 
 
@@ -71,21 +81,66 @@ public class UseRenderingPlugin : MonoBehaviour
 #endif
 	private static extern IntPtr GetRenderEventFunc();
 
-	void Awake() {
-		MyDelegate callback_delegate = new MyDelegate( CallBackFunction );
- 
-		// Convert callback_delegate into a function pointer that can be
-		// used in unmanaged code.
-		IntPtr intptr_delegate = 
-		    Marshal.GetFunctionPointerForDelegate(callback_delegate);
-		  
-		// Call the API passing along the function pointer.
-		SetDebugFunction( intptr_delegate );
-	}
 
-	IEnumerator Start()
+#if UNITY_IPHONE && !UNITY_EDITOR
+	[DllImport ("__Internal")]
+#else
+    [DllImport("RenderingPlugin")]
+#endif
+    private static extern IntPtr GetDebugInfo();
+
+#endif
+
+#if LIVE_RELOAD
+    static IntPtr nativeLibraryPtr;
+#endif
+
+
+    void Awake() {
+#if LIVE_RELOAD
+        if (nativeLibraryPtr != IntPtr.Zero)
+            return;
+
+        nativeLibraryPtr = Native.LoadLibrary("RenderingPlugin");
+        if (nativeLibraryPtr == IntPtr.Zero)
+            Debug.LogError("Failed to load native library");
+#endif
+
+        MyDelegate callback_delegate = new MyDelegate(CallBackFunction);
+
+        // Convert callback_delegate into a function pointer that can be
+        // used in unmanaged code.
+        IntPtr intptr_delegate =
+            Marshal.GetFunctionPointerForDelegate(callback_delegate);
+
+        // Call the API passing along the function pointer.
+
+#if LIVE_RELOAD
+        var result = Native.Invoke<int, SetDebugFunction>(nativeLibraryPtr, intptr_delegate);
+        var debugInfo = Native.Invoke<IntPtr, GetDebugInfo>(nativeLibraryPtr);
+#else
+        SetDebugFunction(intptr_delegate);
+        var debugInfo = GetDebugInfo();
+#endif
+        Debug.Log("DebugInfo: " + Marshal.PtrToStringAnsi(debugInfo));
+    }
+
+#if LIVE_RELOAD
+    void OnApplicationQuit() {
+        if (nativeLibraryPtr == IntPtr.Zero) return;
+        Debug.Log(Native.FreeLibrary(nativeLibraryPtr)
+                      ? "Native library successfully unloaded."
+                      : "Native library could not be unloaded.");
+    }
+#endif
+
+    IEnumerator Start()
 	{
-		SetUnityStreamingAssetsPath(Application.streamingAssetsPath);
+#if LIVE_RELOAD
+        Native.Invoke<SetUnityStreamingAssetsPath>(nativeLibraryPtr, Application.streamingAssetsPath);
+#else
+        SetUnityStreamingAssetsPath(Application.streamingAssetsPath);
+#endif
 
 		CreateTextureAndPassToPlugin();
 		yield return StartCoroutine("CallPluginAtEndOfFrames");
@@ -103,28 +158,50 @@ public class UseRenderingPlugin : MonoBehaviour
 		// Set texture onto our matrial
 		GetComponent<Renderer>().material.mainTexture = tex;
 
-		// Pass texture pointer to the plugin
-	#if UNITY_GLES_RENDERER
-		SetTextureFromUnity (tex.GetNativeTexturePtr(), tex.width, tex.height);
-	#else
-		SetTextureFromUnity (tex.GetNativeTexturePtr());
-	#endif
-	}
+        // Pass texture pointer to the plugin
 
-	private IEnumerator CallPluginAtEndOfFrames()
+        var texturePtr = tex.GetNativeTexturePtr();
+
+#if UNITY_GLES_RENDERER
+#if LIVE_RELOAD
+        Native.Invoke<SetTextureFromUnity>(nativeLibraryPtr, texturePtr, tex.width, tex.height);
+#else
+		SetTextureFromUnity (texturePtr, tex.width, tex.height);
+#endif
+#else
+#if LIVE_RELOAD
+        Native.Invoke<SetTextureFromUnity>(nativeLibraryPtr, texturePtr);
+#else
+        SetTextureFromUnity (texturePtr);
+#endif
+#endif
+    }
+
+    private IEnumerator CallPluginAtEndOfFrames()
 	{
 		while (true) {
 			// Wait until all frame rendering is done
 			yield return new WaitForEndOfFrame();
 
-			// Set time for the plugin
-			SetTimeFromUnity (Time.timeSinceLevelLoad);
+            // Set time for the plugin
+#if LIVE_RELOAD
+            Native.Invoke<SetTimeFromUnity>(nativeLibraryPtr, Time.timeSinceLevelLoad);
 
-			// Issue a plugin event with arbitrary integer identifier.
-			// The plugin can distinguish between different
-			// things it needs to do based on this ID.
-			// For our simple plugin, it does not matter which ID we pass here.
-			GL.IssuePluginEvent(GetRenderEventFunc(), 1);
+#else
+            SetTimeFromUnity (Time.timeSinceLevelLoad);
+#endif
+
+
+            // Issue a plugin event with arbitrary integer identifier.
+            // The plugin can distinguish between different
+            // things it needs to do based on this ID.
+            // For our simple plugin, it does not matter which ID we pass here.
+#if LIVE_RELOAD
+            var renderEventFunc = Native.Invoke<IntPtr, GetRenderEventFunc>(nativeLibraryPtr);
+#else
+            var renderEventFunc = GetRenderEventFunc();
+#endif
+            GL.IssuePluginEvent(renderEventFunc, 1);
 		}
 	}
 }
