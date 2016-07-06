@@ -40,16 +40,7 @@
 #endif
 
 typedef void (*FuncPtr)( const char * );
-
 FuncPtr Debug;
-extern "C"
-{
-    UNITY_INTERFACE_EXPORT  void SetDebugFunction( FuncPtr fp )
-    {
-        Debug = fp;
-    }
-}
-
 // --------------------------------------------------------------------------
 // Helper utilities
 
@@ -1151,4 +1142,16 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
         
 	}
 	#endif
+}
+
+extern "C" {
+
+UNITY_INTERFACE_EXPORT  void SetDebugFunction( FuncPtr fp )
+{
+    Debug = fp;
+}
+
+UNITY_INTERFACE_EXPORT void SetShaderSource(const char* source) {
+}
+
 }
