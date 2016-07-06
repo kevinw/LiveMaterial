@@ -1,4 +1,3 @@
-// Example low level rendering Unity plugin
 #include "RenderingPlugin.h"
 #include "Unity/IUnityGraphics.h"
 
@@ -33,9 +32,12 @@
 #	elif UNITY_ANDROID
 #		include <GLES2/gl2.h>
 #	else
-//#		include "GL/glew.h"
-#include "OpenGL/gl3.h"
-#include "OpenGL/glu.h"
+#       if defined(_WIN32) || defined(_WIN64)
+#			include "GL/glew.h"
+#       else
+#			include "OpenGL/gl3.h"
+#			include "OpenGL/glu.h"
+#		endif
 #	endif
 #endif
 
@@ -985,7 +987,13 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 			ID3D12Resource* upload = GetD3D12UploadResource(kDataSize);
 			void* mapped = NULL;
 			upload->Map(0, NULL, &mapped);
-			FillTextureFromCode(desc.Width, desc.Height, desc.Width*4, (unsigned char*)mapped);
+			if (desc.Width > MAXINT32)
+				throw "error";
+			if (desc.Height > MAXINT32)
+				throw "error";
+			int w = static_cast<int>(desc.Width);
+			int h = static_cast<int>(desc.Height);
+			FillTextureFromCode(w, h, w*4, (unsigned char*)mapped);
 			upload->Unmap(0, NULL);
 
 			D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
