@@ -98,7 +98,7 @@ static float g_Time;
 
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTimeFromUnity (float t) { g_Time = t; }
 
-
+GLuint loadShader(GLenum type, const char *shaderSrc);
 
 
 // --------------------------------------------------------------------------
@@ -139,6 +139,8 @@ static std::string s_UnityStreamingAssetsPath;
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetUnityStreamingAssetsPath(const char* path)
 {
 	s_UnityStreamingAssetsPath = path;
+  Debug("Set PATH");
+  Debug(path);
 }
 
 
@@ -262,12 +264,41 @@ struct MyVertex {
 static void SetDefaultGraphicsState ();
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts);
 
+static std::string newFragShaderText;
+static bool newFragShader = false;
+
+
+static GLuint	g_VProg;
+static GLuint	g_FShader;
+static GLuint	g_Program;
+static GLuint	g_VertexArray;
+static GLuint	g_ArrayBuffer;
+static int		g_WorldMatrixUniformIndex;
+static int		g_ProjMatrixUniformIndex;
+
+static void LinkProgram();
+
 static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 {
 	// Unknown graphics device type? Do nothing.
 	if (s_DeviceType == kUnityGfxRendererNull)
 		return;
-
+    
+    if (newFragShader) {
+        newFragShader = false;
+        Debug("In OnRenderEvent and newFragShader is true");
+        
+        GLuint newShader = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str());
+        if (newShader) {
+            g_FShader = newShader;
+            Debug("set g_FShader");
+            LinkProgram();
+            Debug("done linking program");
+        } else {
+            Debug("nope");
+        }
+        printOpenGLError();
+    }
 
 	// A colored triangle. Note that colors will come out differently
 	// in D3D9/11 and OpenGL, for example, since they expect color bytes
@@ -662,7 +693,7 @@ static const char* kGlesVProgTextGLCore		= VPROG_SRC("#version 150\n", "in", "ou
 	"\n"											\
 	"void main()\n"									\
 	"{\n"											\
-	"	" outVar " = vec4(1,0,1,1);\n"						\
+	"	" outVar " = vec4(1,0,0,1);\n"						\
 	"}\n"											\
 
 static const char* kGlesFShaderTextGLES2	= FSHADER_SRC("\n", "varying", "\n", "gl_FragColor");
@@ -671,21 +702,114 @@ static const char* kGlesFShaderTextGLCore	= FSHADER_SRC("#version 150\n", "in", 
 
 #undef FSHADER_SRC
 
-static GLuint	g_VProg;
-static GLuint	g_FShader;
-static GLuint	g_Program;
-static GLuint	g_VertexArray;
-static GLuint	g_ArrayBuffer;
-static int		g_WorldMatrixUniformIndex;
-static int		g_ProjMatrixUniformIndex;
+
+GLuint loadShader(GLenum type, const char *shaderSrc)
+{
+   GLuint shader;
+   GLint compiled;
+   
+   // Create the shader object
+   shader = glCreateShader ( type );
+
+   if ( shader == 0 ) {
+     Debug("could not create shader object");
+   	return 0;
+   }
+
+   // Load the shader source
+   glShaderSource ( shader, 1, &shaderSrc, NULL );
+   
+   // Compile the shader
+   glCompileShader ( shader );
+
+   // Check the compile status
+   glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
+
+   if ( !compiled ) 
+   {
+      GLint infoLen = 0;
+
+      glGetShaderiv ( shader, GL_INFO_LOG_LENGTH, &infoLen );
+
+      Debug("error compiling shader");
+      
+      if ( infoLen > 1 )
+      {
+         char* infoLog = (char*)malloc (sizeof(char) * infoLen );
+
+         glGetShaderInfoLog ( shader, infoLen, NULL, infoLog );
+
+         Debug(infoLog);
+         
+         free ( infoLog );
+      }
+
+      glDeleteShader ( shader );
+      return 0;
+   }
+
+   return shader;
+
+}
 
 static GLuint CreateShader(GLenum type, const char* text)
 {
-	GLuint ret = glCreateShader(type);
-	glShaderSource(ret, 1, &text, NULL);
-	glCompileShader(ret);
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &text, NULL);
+  Debug("compiling shader:");
+  Debug(text);
+	glCompileShader(shader);
 
-	return ret;
+  GLint isCompiled = 0;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &isCompiled);
+  if (isCompiled == GL_FALSE) {
+    if (!glIsShader(shader)) {
+      Debug("Not a shader.");
+      return -1;
+    }
+
+    GLint maxLength = 0;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &maxLength);
+
+    Debug("error compiling shader");
+
+    // The maxLength includes the NULL character
+    std::vector<GLchar> errorLog(maxLength);
+    glGetShaderInfoLog(shader, maxLength, &maxLength, &errorLog[0]);
+
+    Debug(errorLog.data());
+    printOpenGLError();
+
+    // Provide the infolog in whatever manor you deem best.
+    // Exit with failure.
+    glDeleteShader(shader); // Don't leak the shader.
+    return -1;
+  }
+
+	return shader;
+}
+
+static void LinkProgram() {
+    GLuint program = glCreateProgram();
+    glBindAttribLocation(program, ATTRIB_POSITION, "pos");
+    glBindAttribLocation(program, ATTRIB_COLOR, "color");
+    glAttachShader(program, g_VProg);
+    glAttachShader(program, g_FShader);
+#if SUPPORT_OPENGL_CORE
+    if(s_DeviceType == kUnityGfxRendererOpenGLCore)
+        glBindFragDataLocationEXT(program, 0, "fragColor");
+#endif
+    glLinkProgram(program);
+    
+    GLint status = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    
+    if (status == GL_TRUE) {
+        g_Program = program;
+        Debug("successfully linked program and set g_Program");
+    } else {
+        Debug("failure linking program");
+    }
 }
 
 static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
@@ -721,20 +845,7 @@ static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
 		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(MyVertex) * 3, NULL, GL_STREAM_DRAW);
 
-		g_Program = glCreateProgram();
-		glBindAttribLocation(g_Program, ATTRIB_POSITION, "pos");
-		glBindAttribLocation(g_Program, ATTRIB_COLOR, "color");
-		glAttachShader(g_Program, g_VProg);
-		glAttachShader(g_Program, g_FShader);
-#if SUPPORT_OPENGL_CORE
-		if(s_DeviceType == kUnityGfxRendererOpenGLCore)
-			glBindFragDataLocationEXT(g_Program, 0, "fragColor");
-#endif
-		glLinkProgram(g_Program);
-
-		GLint status = 0;
-		glGetProgramiv(g_Program, GL_LINK_STATUS, &status);
-		assert(status == GL_TRUE);
+        LinkProgram();
 
 		g_WorldMatrixUniformIndex	= glGetUniformLocation(g_Program, "worldMatrix");
 		g_ProjMatrixUniformIndex	= glGetUniformLocation(g_Program, "projMatrix");
@@ -1171,7 +1282,11 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp)
 }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* pixelShader, const char* vertexShader) {
-
+  Debug("updating shader source");
+    
+    newFragShaderText = pixelShader;
+    newFragShader = true;
+    
 }
 
 static char buf[2048];
@@ -1197,11 +1312,14 @@ extern "C"  UNITY_INTERFACE_EXPORT  const char* GetDebugInfo() {
 			WAT("OpenGL 2 Legacy");
 #endif
 #if SUPPORT_OPENGL_UNIFIED
-		// OpenGL ES / core case
-		if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
-			s_DeviceType == kUnityGfxRendererOpenGLES30 ||
-			s_DeviceType == kUnityGfxRendererOpenGLCore)
-			WAT("OpenGL Unified");
+		if (s_DeviceType == kUnityGfxRendererOpenGLES20)
+      WAT("OpenGL ES 2.0");
+
+    if (s_DeviceType == kUnityGfxRendererOpenGLES30)
+      WAT("OpenGL ES 3.0");
+
+    if (s_DeviceType == kUnityGfxRendererOpenGLCore)
+      WAT("OpenGL Core");
 #endif
 
 	WAT("UNKNOWN DEVICE");

@@ -10,8 +10,27 @@ using System;
 using System.Collections;
 using System.Runtime.InteropServices;
 
+#if UNITY_EDITOR
+using UnityEditor;
+[CustomEditor(typeof(UseRenderingPlugin))]
+public class UseRenderingPluginEditor : Editor {
+	public override void OnInspectorGUI() {
+		DrawDefaultInspector();
 
-
+        var plugin = (UseRenderingPlugin)target;
+        if (GUILayout.Button("Update Shader"))
+        {
+			string frag = @"#version 150
+out lowp vec4 fragColor;
+in lowp vec4 ocolor;
+void main() {
+	fragColor = vec4(0, 1, 0, 1);
+}";
+			plugin.SetShader (frag);
+        }
+	}
+}
+#endif
 
 public class UseRenderingPlugin : MonoBehaviour
 {
@@ -51,6 +70,14 @@ public class UseRenderingPlugin : MonoBehaviour
 #endif
 	public static extern int SetDebugFunction( IntPtr fp );
 
+#if UNITY_IPHONE && !UNITY_EDITOR
+	[DllImport ("__Internal")]
+#else
+	[DllImport ("RenderingPlugin")]
+#endif
+	private static extern void SetShaderSource(
+		[MarshalAs(UnmanagedType.LPStr)] string frag,
+		[MarshalAs(UnmanagedType.LPStr)] string vert);
 
 	// We'll also pass native pointer to a texture in Unity.
 	// The plugin will fill texture data from native code.
@@ -203,5 +230,14 @@ public class UseRenderingPlugin : MonoBehaviour
 #endif
             GL.IssuePluginEvent(renderEventFunc, 1);
 		}
+	}
+
+	public void SetShader(string frag) {
+#if LIVE_RELOAD
+            Native.Invoke<SetShaderSource>(nativeLibraryPtr, frag, "");
+#else
+            SetShaderSource(frag, "");
+#endif
+
 	}
 }
