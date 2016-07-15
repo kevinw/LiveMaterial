@@ -1,0 +1,7 @@
+working LIVE
+
+echo "COPYING" & del "$(ProjectDir)..\..\UnityProject\$(TargetName).dll" & copy "$(TargetPath)" "$(ProjectDir)..\..\UnityProject"
+
+working NOT LIVE
+
+echo "COPYING" & del "$(ProjectDir)..\..\UnityProject\Assets\Plugins\x86_64\$(TargetName).dll" & copy "$(TargetPath)" "$(ProjectDir)..\..\UnityProject\Assets\Plugins\x86_64\"

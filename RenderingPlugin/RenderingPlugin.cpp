@@ -7,6 +7,8 @@
 #include <vector>
 #include <string>
 
+#define NUM_VERTS 6
+
 // --------------------------------------------------------------------------
 // Include headers for the graphics APIs we support
 
@@ -139,8 +141,6 @@ static std::string s_UnityStreamingAssetsPath;
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetUnityStreamingAssetsPath(const char* path)
 {
 	s_UnityStreamingAssetsPath = path;
-  Debug("Set PATH");
-  Debug(path);
 }
 
 
@@ -278,35 +278,32 @@ static int		g_ProjMatrixUniformIndex;
 
 static void LinkProgram();
 
+#if SUPPORT_D3D11
+HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, _Outptr_ ID3DBlob** blob);
+#endif
+
+static void MaybeLoadNewShaders();
+
 static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 {
 	// Unknown graphics device type? Do nothing.
 	if (s_DeviceType == kUnityGfxRendererNull)
 		return;
-    
-    if (newFragShader) {
-        newFragShader = false;
-        Debug("In OnRenderEvent and newFragShader is true");
-        
-        GLuint newShader = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str());
-        if (newShader) {
-            g_FShader = newShader;
-            Debug("set g_FShader");
-            LinkProgram();
-            Debug("done linking program");
-        } else {
-            Debug("nope");
-        }
-        printOpenGLError();
-    }
+
+	MaybeLoadNewShaders();
 
 	// A colored triangle. Note that colors will come out differently
 	// in D3D9/11 and OpenGL, for example, since they expect color bytes
 	// in different ordering.
-	MyVertex verts[3] = {
-		{ -0.5f, -0.25f,  0, 0xFFff0000 },
-		{  0.5f, -0.25f,  0, 0xFF00ff00 },
-		{  0,     0.5f ,  0, 0xFF0000ff },
+	MyVertex verts[NUM_VERTS] = {
+		{  -1.0f, -1.0f,  0, 0xFFffFFFF },
+		{   1.0f,  1.0f,  0, 0xFFFFffFF },
+		{  -1.0,   1.0f ,  0, 0xFFFFFFff },
+
+		{ -1.0f, -1.0f,  0, 0xFFffFFFF },
+		{ 1.0f,  -1.0f,  0, 0xFFFFffFF },
+		{ 1.0,    1.0f ,  0, 0xFFFFFFff },
+
 	};
 
 
@@ -314,12 +311,12 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 	// matrix, identity view matrix, and identity projection matrix.
 
 	float phi = g_Time;
-	float cosPhi = cosf(phi);
-	float sinPhi = sinf(phi);
+	float cosPhi =  cosf(phi);
+	float sinPhi =   sinf(phi);
 
 	float worldMatrix[16] = {
-		cosPhi,-sinPhi,0,0,
-		sinPhi,cosPhi,0,0,
+		1,0,0,0,
+		0,1,0,0,
 		0,0,1,0,
 		0,0,0.7f,1,
 	};
@@ -516,6 +513,57 @@ static bool EnsureD3D11ResourcesAreCreated()
 
 	return true;
 }
+
+
+
+static void MaybeLoadNewShaders() {
+
+	if (!newFragShader)
+		return;
+
+	newFragShader = false;
+
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
+	if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
+		s_DeviceType == kUnityGfxRendererOpenGLES30 ||
+		s_DeviceType == kUnityGfxRendererOpenGLCore ||
+		s_DeviceType == kUnityGfxRendererOpenGL) {
+
+		GLuint newShader = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str());
+		if (newShader) {
+			g_FShader = newShader;
+			LinkProgram();
+		}
+		else {
+			Debug("nope");
+		}
+		printOpenGLError();
+	}
+#endif
+
+#if SUPPORT_D3D11
+	// D3D11 case
+	if (s_DeviceType == kUnityGfxRendererD3D11)
+	{
+		ID3DBlob *PS = nullptr;
+		HRESULT hr = -1;
+		hr = CompileShader(newFragShaderText.c_str(), "SimplePixelShader.cso", "PS", "ps_5_0", &PS);
+		if (FAILED(hr)) {
+			Debug("Could not compile shader");
+		} else {
+			if (PS && PS->GetBufferPointer()) {
+				hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
+				if (FAILED(hr)) {
+					Debug("Failed to create pixel shader.\n");
+				}
+			} else {
+				Debug("pointer was null");
+			}
+		}
+	}
+#endif
+}
+
 
 static void ReleaseD3D11Resources()
 {
@@ -806,7 +854,6 @@ static void LinkProgram() {
     
     if (status == GL_TRUE) {
         g_Program = program;
-        Debug("successfully linked program and set g_Program");
     } else {
         Debug("failure linking program");
     }
@@ -1006,7 +1053,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		// DrawPrimitiveUP just fine as well.
 		void* vbPtr;
 		g_D3D9DynamicVB->Lock (0, 0, &vbPtr, D3DLOCK_DISCARD);
-		memcpy (vbPtr, verts, sizeof(verts[0])*3);
+		memcpy (vbPtr, verts, sizeof(verts[0])*NUM_VERTS);
 		g_D3D9DynamicVB->Unlock ();
 		g_D3D9Device->SetStreamSource (0, g_D3D9DynamicVB, 0, sizeof(MyVertex));
 
@@ -1044,7 +1091,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		ctx->PSSetShader (g_D3D11PixelShader, NULL, 0);
 
 		// update vertex buffer
-		ctx->UpdateSubresource (g_D3D11VB, 0, NULL, verts, sizeof(verts[0])*3, 0);
+		ctx->UpdateSubresource (g_D3D11VB, 0, NULL, verts, sizeof(verts[0])*NUM_VERTS, 0);
 
 		// set input assembler data and draw
 		ctx->IASetInputLayout (g_D3D11InputLayout);
@@ -1052,7 +1099,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		UINT stride = sizeof(MyVertex);
 		UINT offset = 0;
 		ctx->IASetVertexBuffers (0, 1, &g_D3D11VB, &stride, &offset);
-		ctx->Draw (3, 0);
+		ctx->Draw (NUM_VERTS, 0);
 
 		// update native texture from code
 		if (g_TexturePointer)
@@ -1168,7 +1215,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		glLoadMatrixf (projectionMatrix);
 
 		// Vertex layout
-		glVertexPointer (3, GL_FLOAT, sizeof(verts[0]), &verts[0].x);
+		glVertexPointer (NUM_VERTS, GL_FLOAT, sizeof(verts[0]), &verts[0].x);
 		glEnableClientState (GL_VERTEX_ARRAY);
 		glColorPointer (4, GL_UNSIGNED_BYTE, sizeof(verts[0]), &verts[0].color);
 		glEnableClientState (GL_COLOR_ARRAY);
@@ -1273,7 +1320,6 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp)
 {
     _DebugFunc = fp;
 	if (fp) {
-		_DebugFunc("Debug function set");
 		return 11;
 	}
 	else {
@@ -1282,11 +1328,9 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp)
 }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* pixelShader, const char* vertexShader) {
-  Debug("updating shader source");
-    
+	// TODO: threadsafe
     newFragShaderText = pixelShader;
-    newFragShader = true;
-    
+    newFragShader = true;    
 }
 
 static char buf[2048];
