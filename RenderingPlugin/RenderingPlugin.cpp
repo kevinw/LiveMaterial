@@ -309,11 +309,6 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 
 	// Some transformation matrices: rotate around Z axis for world
 	// matrix, identity view matrix, and identity projection matrix.
-
-	float phi = g_Time;
-	float cosPhi =  cosf(phi);
-	float sinPhi =   sinf(phi);
-
 	float worldMatrix[16] = {
 		1,0,0,0,
 		0,1,0,0,
@@ -516,64 +511,7 @@ static bool EnsureD3D11ResourcesAreCreated()
 
 
 
-static void MaybeLoadNewShaders() {
 
-	if (!newFragShader)
-		return;
-
-	newFragShader = false;
-
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
-	if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
-		s_DeviceType == kUnityGfxRendererOpenGLES30 ||
-		s_DeviceType == kUnityGfxRendererOpenGLCore ||
-		s_DeviceType == kUnityGfxRendererOpenGL) {
-
-		GLuint newShader = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str());
-		if (newShader) {
-			g_FShader = newShader;
-			LinkProgram();
-		}
-		else {
-			Debug("nope");
-		}
-		printOpenGLError();
-	}
-#endif
-
-#if SUPPORT_D3D11
-	// D3D11 case
-	if (s_DeviceType == kUnityGfxRendererD3D11)
-	{
-		ID3DBlob *PS = nullptr;
-		ID3DBlob *error = nullptr;
-		HRESULT hr = -1;
-		hr = CompileShader(newFragShaderText.c_str(), "SimplePixelShader.cso", "PS", "ps_5_0", &PS, &error);
-		if (FAILED(hr)) {
-			Debug("Could not compile shader");
-			if (error) {
-				std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
-				Debug("error blob:");
-				Debug(errstr.c_str());
-			}
-			else {
-				Debug("..and no error blob :(");
-			}
-
-
-		} else {
-			if (PS && PS->GetBufferPointer()) {
-				hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
-				if (FAILED(hr)) {
-					Debug("Failed to create pixel shader.\n");
-				}
-			} else {
-				Debug("pointer was null");
-			}
-		}
-	}
-#endif
-}
 
 
 static void ReleaseD3D11Resources()
@@ -605,6 +543,65 @@ static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 
 #endif // #if SUPPORT_D3D11
 
+
+static void MaybeLoadNewShaders() {
+    
+    if (!newFragShader)
+        return;
+    
+    newFragShader = false;
+    
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
+    if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
+        s_DeviceType == kUnityGfxRendererOpenGLES30 ||
+        s_DeviceType == kUnityGfxRendererOpenGLCore ||
+        s_DeviceType == kUnityGfxRendererOpenGL) {
+        
+        GLuint newShader = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str());
+        if (newShader) {
+            g_FShader = newShader;
+            LinkProgram();
+        }
+        else {
+            Debug("nope");
+        }
+        printOpenGLError();
+    }
+#endif
+    
+#if SUPPORT_D3D11
+    // D3D11 case
+    if (s_DeviceType == kUnityGfxRendererD3D11)
+    {
+        ID3DBlob *PS = nullptr;
+        ID3DBlob *error = nullptr;
+        HRESULT hr = -1;
+        hr = CompileShader(newFragShaderText.c_str(), "SimplePixelShader.cso", "PS", "ps_5_0", &PS, &error);
+        if (FAILED(hr)) {
+            Debug("Could not compile shader");
+            if (error) {
+                std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
+                Debug("error blob:");
+                Debug(errstr.c_str());
+            }
+            else {
+                Debug("..and no error blob :(");
+            }
+            
+            
+        } else {
+            if (PS && PS->GetBufferPointer()) {
+                hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
+                if (FAILED(hr)) {
+                    Debug("Failed to create pixel shader.\n");
+                }
+            } else {
+                Debug("pointer was null");
+            }
+        }
+    }
+#endif
+}
 
 
 // -------------------------------------------------------------------
