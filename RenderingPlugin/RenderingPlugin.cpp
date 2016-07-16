@@ -279,7 +279,7 @@ static int		g_ProjMatrixUniformIndex;
 static void LinkProgram();
 
 #if SUPPORT_D3D11
-HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, _Outptr_ ID3DBlob** blob);
+HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob);
 #endif
 
 static void MaybeLoadNewShaders();
@@ -546,10 +546,21 @@ static void MaybeLoadNewShaders() {
 	if (s_DeviceType == kUnityGfxRendererD3D11)
 	{
 		ID3DBlob *PS = nullptr;
+		ID3DBlob *error = nullptr;
 		HRESULT hr = -1;
-		hr = CompileShader(newFragShaderText.c_str(), "SimplePixelShader.cso", "PS", "ps_5_0", &PS);
+		hr = CompileShader(newFragShaderText.c_str(), "SimplePixelShader.cso", "PS", "ps_5_0", &PS, &error);
 		if (FAILED(hr)) {
 			Debug("Could not compile shader");
+			if (error) {
+				std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
+				Debug("error blob:");
+				Debug(errstr.c_str());
+			}
+			else {
+				Debug("..and no error blob :(");
+			}
+
+
 		} else {
 			if (PS && PS->GetBufferPointer()) {
 				hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
