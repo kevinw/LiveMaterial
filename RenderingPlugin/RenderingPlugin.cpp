@@ -100,7 +100,7 @@ static float g_Time;
 
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTimeFromUnity (float t) { g_Time = t; }
 
-GLuint loadShader(GLenum type, const char *shaderSrc);
+GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath);
 
 
 // --------------------------------------------------------------------------
@@ -267,6 +267,9 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 static std::string newFragShaderText;
 static bool newFragShader = false;
 
+static std::string newVertShaderText;
+static bool newVertShader = false;
+
 
 static GLuint	g_VProg;
 static GLuint	g_FShader;
@@ -296,13 +299,13 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 	// in D3D9/11 and OpenGL, for example, since they expect color bytes
 	// in different ordering.
 	MyVertex verts[NUM_VERTS] = {
-		{  -1.0f, -1.0f,  0, 0xFFffFFFF },
-		{   1.0f,  1.0f,  0, 0xFFFFffFF },
-		{  -1.0,   1.0f ,  0, 0xFFFFFFff },
+		{  -1.0f, -1.0f,  0, 0xffffffff },
+		{   1.0f,  1.0f,  0, 0xffffffff },
+		{  -1.0,   1.0f ,  0, 0xffffffff },
 
-		{ -1.0f, -1.0f,  0, 0xFFffFFFF },
-		{ 1.0f,  -1.0f,  0, 0xFFFFffFF },
-		{ 1.0,    1.0f ,  0, 0xFFFFFFff },
+		{ -1.0f, -1.0f,  0, 0xffffffff },
+		{ 1.0f,  -1.0f,  0, 0xffffffff },
+		{ 1.0,    1.0f ,  0, 0xffffffff },
 
 	};
 
@@ -546,10 +549,8 @@ static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 
 static void MaybeLoadNewShaders() {
     
-    if (!newFragShader)
+    if (!newFragShader || !newVertShader)
         return;
-    
-    newFragShader = false;
     
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
     if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
@@ -557,14 +558,21 @@ static void MaybeLoadNewShaders() {
         s_DeviceType == kUnityGfxRendererOpenGLCore ||
         s_DeviceType == kUnityGfxRendererOpenGL) {
         
-        GLuint newShader = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str());
-        if (newShader) {
-            g_FShader = newShader;
-            LinkProgram();
+        if (newFragShader) {
+            newFragShader = false;
+            GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str(), "/Users/kevin/Desktop/last_shader.frag");
+            if (newFrag)
+                g_FShader = newFrag;
         }
-        else {
-            Debug("nope");
+        
+        if (newVertShader) {
+            newVertShader = false;
+            GLuint newVert = loadShader(GL_VERTEX_SHADER, newVertShaderText.c_str(), "/Users/kevin/Desktop/last_shader.vert");
+            if (newVert)
+                g_VProg = newVert;
         }
+
+        LinkProgram();
         printOpenGLError();
     }
 #endif
@@ -758,8 +766,10 @@ static const char* kGlesFShaderTextGLCore	= FSHADER_SRC("#version 150\n", "in", 
 
 #undef FSHADER_SRC
 
+#include <fstream>
 
-GLuint loadShader(GLenum type, const char *shaderSrc)
+
+GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
 {
    GLuint shader;
    GLint compiled;
@@ -771,33 +781,37 @@ GLuint loadShader(GLenum type, const char *shaderSrc)
      Debug("could not create shader object");
    	return 0;
    }
-
+    
+    if (debugOutPath) {
+        std::ofstream debugOut;
+        debugOut.open(debugOutPath);
+        debugOut << shaderSrc;
+        debugOut.close();
+    }
+    
+    std::string s = "GLSL Version ";
+    s += (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION);
+    Debug(s.c_str());
+    
    // Load the shader source
-   glShaderSource ( shader, 1, &shaderSrc, NULL );
-   
+   glShaderSource(shader, 1, &shaderSrc, NULL);
+
    // Compile the shader
-   glCompileShader ( shader );
+   glCompileShader(shader);
 
    // Check the compile status
    glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
 
    if ( !compiled ) 
    {
-      GLint infoLen = 0;
-
-      glGetShaderiv ( shader, GL_INFO_LOG_LENGTH, &infoLen );
-
-      Debug("error compiling shader");
-      
-      if ( infoLen > 1 )
-      {
-         char* infoLog = (char*)malloc (sizeof(char) * infoLen );
-
-         glGetShaderInfoLog ( shader, infoLen, NULL, infoLog );
-
+       GLint infoLen = 0;
+       glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
+       Debug("error compiling shader:");
+      if (infoLen > 1) {
+         char* infoLog = (char*)malloc (sizeof(char) * infoLen);
+         glGetShaderInfoLog(shader, infoLen, NULL, infoLog);
          Debug(infoLog);
-         
-         free ( infoLog );
+         free(infoLog);
       }
 
       glDeleteShader ( shader );
@@ -863,7 +877,17 @@ static void LinkProgram() {
     if (status == GL_TRUE) {
         g_Program = program;
     } else {
-        Debug("failure linking program");
+        Debug("failure linking program:");
+        
+        GLint infoLen = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLen);
+        if (infoLen > 1) {
+            char* infoLog = (char*)malloc (sizeof(char) * infoLen);
+            glGetProgramInfoLog(program, infoLen, NULL, infoLog);
+            Debug(infoLog);
+            free(infoLog);
+        }
+        
     }
 }
 
@@ -895,7 +919,7 @@ static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
 			g_FShader	= CreateShader(GL_FRAGMENT_SHADER, kGlesFShaderTextGLCore);
 		}
 #endif
-
+        
 		glGenBuffers(1, &g_ArrayBuffer);
 		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(MyVertex) * 3, NULL, GL_STREAM_DRAW);
@@ -904,8 +928,8 @@ static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
 
 		g_WorldMatrixUniformIndex	= glGetUniformLocation(g_Program, "worldMatrix");
 		g_ProjMatrixUniformIndex	= glGetUniformLocation(g_Program, "projMatrix");
-
-		assert(glGetError() == GL_NO_ERROR);
+        
+    printOpenGLError();
 	}
 	else if (eventType == kUnityGfxDeviceEventShutdown)
 	{
@@ -1267,6 +1291,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		glUseProgram(g_Program);
 		glUniformMatrix4fv(g_WorldMatrixUniformIndex, 1, GL_FALSE, worldMatrix);
 		glUniformMatrix4fv(g_ProjMatrixUniformIndex, 1, GL_FALSE, projectionMatrix);
+    printOpenGLError();
 
 #if SUPPORT_OPENGL_CORE
 		if (s_DeviceType == kUnityGfxRendererOpenGLCore)
@@ -1274,19 +1299,26 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 			glGenVertexArrays(1, &g_VertexArray);
 			glBindVertexArray(g_VertexArray);
 		}
+        printOpenGLError();
 #endif
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    printOpenGLError();
+        
 		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
 		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(MyVertex) * 3, &verts[0].x);
+    printOpenGLError();
 
 		glEnableVertexAttribArray(ATTRIB_POSITION);
 		glVertexAttribPointer(ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(MyVertex), BUFFER_OFFSET(0));
+    printOpenGLError();
 
 		glEnableVertexAttribArray(ATTRIB_COLOR);
 		glVertexAttribPointer(ATTRIB_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(MyVertex), BUFFER_OFFSET(sizeof(float) * 3));
+    printOpenGLError();
 
 		glDrawArrays(GL_TRIANGLES, 0, 3);
+    printOpenGLError();
         
 		// update native texture from code
 		if (g_TexturePointer)
@@ -1336,9 +1368,17 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp)
 }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* pixelShader, const char* vertexShader) {
-	// TODO: threadsafe
-    newFragShaderText = pixelShader;
-    newFragShader = true;    
+    //
+    // TODO: threadsafe
+    //
+    if (pixelShader != nullptr) {
+        newFragShaderText = pixelShader;
+        newFragShader = true;
+    }
+    if (vertexShader != nullptr) {
+        newVertShaderText = vertexShader;
+        newVertShader = true;
+    }
 }
 
 static char buf[2048];
