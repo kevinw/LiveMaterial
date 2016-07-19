@@ -51,6 +51,7 @@ FuncPtr _DebugFunc = nullptr;
 static bool didInit = false;
 static void updateUniforms();
 static void clearUniforms();
+static void printUniforms();
 
 extern "C" {
 UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value);
@@ -58,6 +59,7 @@ UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value);
 
 // --------------------------------------------------------------------------
 // Helper utilities
+
 
 
 // Prints a string
@@ -139,7 +141,8 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTextureFromUnity(v
 enum
 {
 	ATTRIB_POSITION = 0,
-	ATTRIB_COLOR = 1
+	ATTRIB_COLOR = 1,
+    ATTRIB_UV = 2
 };
 
 // --------------------------------------------------------------------------
@@ -276,6 +279,7 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 struct MyVertex {
 	float x, y, z;
 	unsigned int color;
+    float u, v;
 };
 static void SetDefaultGraphicsState ();
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts);
@@ -289,7 +293,7 @@ static bool newVertShader = false;
 
 static GLuint	g_VProg;
 static GLuint	g_FShader;
-static GLuint	g_Program;
+static GLuint	g_Program = 0;
 static GLuint	g_VertexArray;
 static GLuint	g_ArrayBuffer;
 
@@ -313,13 +317,13 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 	// in D3D9/11 and OpenGL, for example, since they expect color bytes
 	// in different ordering.
 	MyVertex verts[NUM_VERTS] = {
-		{  -1.0f, -1.0f,  0, 0xffffffff },
-		{   1.0f,  1.0f,  0, 0xffffffff },
-		{  -1.0,   1.0f ,  0, 0xffffffff },
+		{  -1.0f, -1.0f,  0, 0xffffffff, 0, 0 },
+		{   1.0f,  1.0f,  0, 0xffffffff, 1, 1 },
+		{  -1.0,   1.0f ,  0, 0xffffffff, 0, 1 },
 
-		{ -1.0f, -1.0f,  0, 0xffffffff },
-		{ 1.0f,  -1.0f,  0, 0xffffffff },
-		{ 1.0,    1.0f ,  0, 0xffffffff },
+		{ -1.0f, -1.0f,  0, 0xffffffff, 0, 0 },
+		{ 1.0f,  -1.0f,  0, 0xffffffff, 1, 0 },
+		{ 1.0,    1.0f ,  0, 0xffffffff, 1, 1 },
 
 	};
 
@@ -588,6 +592,7 @@ static void MaybeLoadNewShaders() {
         }
 
         LinkProgram();
+        clearUniforms();
         printOpenGLError();
     }
 #endif
@@ -743,43 +748,6 @@ static void DoEventGraphicsDeviceD3D12(UnityGfxDeviceEventType eventType)
 
 #if SUPPORT_OPENGL_UNIFIED
 
-#define VPROG_SRC(ver, attr, varying)								\
-	ver																\
-	attr " highp vec3 pos;\n"										\
-	attr " lowp vec4 color;\n"										\
-	"\n"															\
-	varying " lowp vec4 ocolor;\n"									\
-	"\n"															\
-	"uniform highp mat4 worldMatrix;\n"								\
-	"uniform highp mat4 projMatrix;\n"								\
-	"\n"															\
-	"void main()\n"													\
-	"{\n"															\
-	"	gl_Position = (projMatrix * worldMatrix) * vec4(pos,1);\n"	\
-	"	ocolor = color;\n"											\
-	"}\n"															\
-
-static const char* kGlesVProgTextGLES2		= VPROG_SRC("\n", "attribute", "varying");
-static const char* kGlesVProgTextGLES3		= VPROG_SRC("#version 300 es\n", "in", "out");
-static const char* kGlesVProgTextGLCore		= VPROG_SRC("#version 150\n", "in", "out");
-
-#undef VPROG_SRC
-
-#define FSHADER_SRC(ver, varying, outDecl, outVar)	\
-	ver												\
-	outDecl											\
-	varying " lowp vec4 ocolor;\n"					\
-	"\n"											\
-	"void main()\n"									\
-	"{\n"											\
-	"	" outVar " = vec4(1,0,0,1);\n"						\
-	"}\n"											\
-
-static const char* kGlesFShaderTextGLES2	= FSHADER_SRC("\n", "varying", "\n", "gl_FragColor");
-static const char* kGlesFShaderTextGLES3	= FSHADER_SRC("#version 300 es\n", "in", "out lowp vec4 fragColor;\n", "fragColor");
-static const char* kGlesFShaderTextGLCore	= FSHADER_SRC("#version 150\n", "in", "out lowp vec4 fragColor;\n", "fragColor");
-
-#undef FSHADER_SRC
 
 #include <fstream>
 
@@ -876,8 +844,10 @@ static GLuint CreateShader(GLenum type, const char* text)
 
 static void LinkProgram() {
     GLuint program = glCreateProgram();
-    glBindAttribLocation(program, ATTRIB_POSITION, "pos");
-    glBindAttribLocation(program, ATTRIB_COLOR, "color");
+    assert(program > 0);
+    glBindAttribLocation(program, ATTRIB_POSITION, "xlat_attrib_POSITION");
+    glBindAttribLocation(program, ATTRIB_COLOR, "xlat_attrib_COLOR");
+    glBindAttribLocation(program, ATTRIB_UV, "xlat_attrib_TEXCOORD0");
     glAttachShader(program, g_VProg);
     glAttachShader(program, g_FShader);
 #if SUPPORT_OPENGL_CORE
@@ -910,6 +880,7 @@ static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
 {
 	if (eventType == kUnityGfxDeviceEventInitialize)
 	{
+        /*
 		if (s_DeviceType == kUnityGfxRendererOpenGLES20)
 		{
 			::printf("OpenGLES 2.0 device\n");
@@ -934,12 +905,13 @@ static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
 			g_FShader	= CreateShader(GL_FRAGMENT_SHADER, kGlesFShaderTextGLCore);
 		}
 #endif
+         */
         
 		glGenBuffers(1, &g_ArrayBuffer);
 		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(MyVertex) * NUM_VERTS, NULL, GL_STREAM_DRAW);
 
-        LinkProgram();
+        //LinkProgram();
         
 	    
     printOpenGLError();
@@ -1297,14 +1269,16 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		s_DeviceType == kUnityGfxRendererOpenGLCore)
 	{
 		assert(glGetError() == GL_NO_ERROR); // Make sure no OpenGL error happen before starting rendering
+        if (g_Program == 0)
+            return;
 
 		// Tweak the projection matrix a bit to make it match what identity projection would do in D3D case.
 		projectionMatrix[10] = 2.0f;
 		projectionMatrix[14] = -1.0f;
 
 		glUseProgram(g_Program);
-//        SetMatrix("worldMatrix", (float*)&worldMatrix[0]);
-//        SetMatrix("projMatrix", (float*)&projectionMatrix[0]);
+//      SetMatrix("worldMatrix", (float*)&worldMatrix[0]);
+//      SetMatrix("projMatrix", (float*)&projectionMatrix[0]);
         updateUniforms();
         printOpenGLError();
 
@@ -1331,6 +1305,10 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		glEnableVertexAttribArray(ATTRIB_COLOR);
 		glVertexAttribPointer(ATTRIB_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(MyVertex), BUFFER_OFFSET(sizeof(float) * 3));
         printOpenGLError();
+        
+        glEnableVertexAttribArray(ATTRIB_UV);
+        glVertexAttribPointer(ATTRIB_UV, 2, GL_FLOAT, GL_TRUE, sizeof(MyVertex), (void*)offsetof(MyVertex, u));
+        
 
 		glDrawArrays(GL_TRIANGLES, 0, NUM_VERTS);
         printOpenGLError();
@@ -1411,14 +1389,43 @@ static ShaderProp* propForName(const char* name, PropType type) {
     ShaderProp* prop = nullptr;
     PropMap::iterator i = shaderProps.find(name);
 
-    if (i == shaderProps.end())
-        prop = shaderProps[name] = new ShaderProp(type, name);
-    else
+    if (i != shaderProps.end())
         prop = i->second;
+    
+    if (prop == nullptr || prop->type != type)
+        prop = shaderProps[name] = new ShaderProp(type, name);
     
     assert(prop->type == type);
     
     return prop;
+}
+
+static void printUniforms() {
+    std::stringstream ss;
+    for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
+        auto prop = i->second;
+        ss << prop->name << " ";
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
+        if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
+            ss << "(INVALID) ";
+#endif
+        switch (prop->type) {
+            case Float:
+                ss << prop->value[0]; break;
+            case Vector2:
+                ss << prop->value[0] << " " << prop->value[1]; break;
+            case Vector3:
+                ss << prop->value[0] << " " << prop->value[1] << " " << prop->value[2]; break;
+            case Vector4:
+            case Matrix:
+                ss << prop->value[0] << " " << prop->value[1] << " " << prop->value[2] << " " << prop->value[3]; break;
+            default:
+                assert(false);
+        }
+        ss << "\n";
+    }
+    std::string s(ss.str());
+    Debug(s.c_str());
 }
 
 static void clearUniforms() {
@@ -1436,6 +1443,9 @@ static void clearUniforms() {
 }
 
 static void updateUniforms() {
+    if (g_Program == 0)
+        return;
+    
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
         
@@ -1446,9 +1456,9 @@ static void updateUniforms() {
             if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
                 prop->uniformIndex = glGetUniformLocation(g_Program, prop->name.c_str());
                 if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID) {
-                    std::stringstream ss; ss << "invalid uniform: " << prop->name;
-                    std::string s(ss.str());
-                    Debug(s.c_str());
+                    //std::stringstream ss; ss << "invalid uniform: " << prop->name;
+                    //std::string s(ss.str());
+                    //Debug(s.c_str());
                     continue;
                 }
                 assert(prop->uniformIndex != ShaderProp::UNIFORM_UNSET);
@@ -1475,10 +1485,10 @@ static void updateUniforms() {
                 default:
                     assert(false);
             }
-            std::stringstream ss;
-            ss << "updated uniform " << i->second->name << " with index " << i->second->uniformIndex;
-            std::string s = ss.str();
-            Debug(s.c_str());
+            //std::stringstream ss;
+            //ss << "updated uniform " << i->second->name << " with index " << i->second->uniformIndex;
+            //std::string s = ss.str();
+            //Debug(s.c_str());
 
         }
 #endif
@@ -1515,6 +1525,11 @@ UNITY_INTERFACE_EXPORT void Reset() {
   didInit = false;
 }
 
+UNITY_INTERFACE_EXPORT void PrintUniforms() {
+    printUniforms();
+}
+
+    
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* pixelShader, const char* vertexShader) {
     // TODO: threadsafe
     if (pixelShader != nullptr) {
