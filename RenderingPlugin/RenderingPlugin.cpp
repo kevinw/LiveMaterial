@@ -1,6 +1,7 @@
 #include "RenderingPlugin.h"
 #include "Unity/IUnityGraphics.h"
 
+#include <sstream>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -47,6 +48,14 @@ typedef void (*FuncPtr)( const char * );
 FuncPtr _DebugFunc = nullptr;
 #define Debug(m) do { if (_DebugFunc) _DebugFunc(m); } while(0);
 
+static bool didInit = false;
+static void updateUniforms();
+static void clearUniforms();
+
+extern "C" {
+UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value);
+}
+
 // --------------------------------------------------------------------------
 // Helper utilities
 
@@ -77,10 +86,9 @@ static void DebugLog (const char* str)
 
 int printOglError(const char *file, int line) {
     GLenum glErr;
-    int    retCode = 0;
-    const int SIZE = 1024;
+    int retCode = 0;
+    const int SIZE = 1024 * 5;
     char buffer [SIZE];
-
     
     glErr = glGetError();
     if (glErr != GL_NO_ERROR)
@@ -142,6 +150,14 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetUnityStreamingAsse
 {
 	s_UnityStreamingAssetsPath = path;
 }
+
+static void INIT_MESSAGE(const char* msg) {
+    if (!didInit) {
+        didInit = true;
+        Debug(msg);
+    }
+}
+
 
 
 
@@ -276,8 +292,6 @@ static GLuint	g_FShader;
 static GLuint	g_Program;
 static GLuint	g_VertexArray;
 static GLuint	g_ArrayBuffer;
-static int		g_WorldMatrixUniformIndex;
-static int		g_ProjMatrixUniformIndex;
 
 static void LinkProgram();
 
@@ -546,6 +560,10 @@ static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 
 #endif // #if SUPPORT_D3D11
 
+#define isOpenGLDevice(d) (d == kUnityGfxRendererOpenGLES20 || \
+    d == kUnityGfxRendererOpenGLES30 || \
+    d == kUnityGfxRendererOpenGLCore || \
+    d == kUnityGfxRendererOpenGL)
 
 static void MaybeLoadNewShaders() {
     
@@ -553,10 +571,7 @@ static void MaybeLoadNewShaders() {
         return;
     
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
-    if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
-        s_DeviceType == kUnityGfxRendererOpenGLES30 ||
-        s_DeviceType == kUnityGfxRendererOpenGLCore ||
-        s_DeviceType == kUnityGfxRendererOpenGL) {
+    if (isOpenGLDevice(s_DeviceType)) {
         
         if (newFragShader) {
             newFragShader = false;
@@ -922,18 +937,15 @@ static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
         
 		glGenBuffers(1, &g_ArrayBuffer);
 		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(MyVertex) * 3, NULL, GL_STREAM_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(MyVertex) * NUM_VERTS, NULL, GL_STREAM_DRAW);
 
         LinkProgram();
-
-		g_WorldMatrixUniformIndex	= glGetUniformLocation(g_Program, "worldMatrix");
-		g_ProjMatrixUniformIndex	= glGetUniformLocation(g_Program, "projMatrix");
         
+	    
     printOpenGLError();
 	}
 	else if (eventType == kUnityGfxDeviceEventShutdown)
 	{
-		
 	}
 }
 #endif
@@ -1060,6 +1072,8 @@ static void FillTextureFromCode (int width, int height, int stride, unsigned cha
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
 {
 	// Does actual rendering of a simple triangle
+  //
+
 
 	#if SUPPORT_D3D9
 	// D3D9 case
@@ -1132,6 +1146,8 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		UINT offset = 0;
 		ctx->IASetVertexBuffers (0, 1, &g_D3D11VB, &stride, &offset);
 		ctx->Draw (NUM_VERTS, 0);
+        
+        INIT_MESSAGE("LiveMaterial is drawing with D3D11");
 
 		// update native texture from code
 		if (g_TexturePointer)
@@ -1230,8 +1246,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 	}
 	#endif
 
-
-
 	#if SUPPORT_OPENGL_LEGACY
 	// OpenGL 2 legacy case (deprecated)
 	if (s_DeviceType == kUnityGfxRendererOpenGL)
@@ -1253,7 +1267,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		glEnableClientState (GL_COLOR_ARRAY);
 
 		// Draw!
-		glDrawArrays (GL_TRIANGLES, 0, 3);
+		glDrawArrays (GL_TRIANGLES, 0, NUM_VERTS);
 
 		// update native texture from code
 		if (g_TexturePointer)
@@ -1289,9 +1303,10 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		projectionMatrix[14] = -1.0f;
 
 		glUseProgram(g_Program);
-		glUniformMatrix4fv(g_WorldMatrixUniformIndex, 1, GL_FALSE, worldMatrix);
-		glUniformMatrix4fv(g_ProjMatrixUniformIndex, 1, GL_FALSE, projectionMatrix);
-    printOpenGLError();
+//        SetMatrix("worldMatrix", (float*)&worldMatrix[0]);
+//        SetMatrix("projMatrix", (float*)&projectionMatrix[0]);
+        updateUniforms();
+        printOpenGLError();
 
 #if SUPPORT_OPENGL_CORE
 		if (s_DeviceType == kUnityGfxRendererOpenGLCore)
@@ -1303,22 +1318,24 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 #endif
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-    printOpenGLError();
+        printOpenGLError();
         
 		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(MyVertex) * 3, &verts[0].x);
-    printOpenGLError();
+		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(MyVertex) * NUM_VERTS, &verts[0].x);
+        printOpenGLError();
 
 		glEnableVertexAttribArray(ATTRIB_POSITION);
 		glVertexAttribPointer(ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(MyVertex), BUFFER_OFFSET(0));
-    printOpenGLError();
+        printOpenGLError();
 
 		glEnableVertexAttribArray(ATTRIB_COLOR);
 		glVertexAttribPointer(ATTRIB_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(MyVertex), BUFFER_OFFSET(sizeof(float) * 3));
-    printOpenGLError();
+        printOpenGLError();
 
-		glDrawArrays(GL_TRIANGLES, 0, 3);
-    printOpenGLError();
+		glDrawArrays(GL_TRIANGLES, 0, NUM_VERTS);
+        printOpenGLError();
+    
+        INIT_MESSAGE("LiveMaterial is drawing with OpenGL ES/Core");
         
 		// update native texture from code
 		if (g_TexturePointer)
@@ -1334,7 +1351,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 			}
 #endif
             
-			unsigned char* data = new unsigned char[g_TexWidth*g_TexHeight*4];
+			auto data = new unsigned char[g_TexWidth*g_TexHeight*4];
 			FillTextureFromCode(g_TexWidth, g_TexHeight, g_TexHeight*4, data);
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_TexWidth, g_TexHeight, GL_RGBA, GL_UNSIGNED_BYTE, data);
 			delete[] data;
@@ -1354,23 +1371,152 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 	#endif
 }
 
+enum PropType {
+    Float,
+    Vector2,
+    Vector3,
+    Vector4,
+    Matrix
+};
+
+struct ShaderProp {
+    ShaderProp(PropType type_, std::string name_)
+    : type(type_)
+    , name(name_)
+    {
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_LEGACY
+        uniformIndex = UNIFORM_UNSET;
+#endif
+    }
+    
+    PropType type;
+    std::string name;
+    float value[16];
+    
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_LEGACY
+    static const int UNIFORM_UNSET = -2;
+    static const int UNIFORM_INVALID = -1;
+    int uniformIndex;
+#endif
+    
+    
+};
+
+#include <map>
+
+typedef std::map<std::string, ShaderProp*> PropMap;
+PropMap shaderProps;
+
+static ShaderProp* propForName(const char* name, PropType type) {
+    ShaderProp* prop = nullptr;
+    PropMap::iterator i = shaderProps.find(name);
+
+    if (i == shaderProps.end())
+        prop = shaderProps[name] = new ShaderProp(type, name);
+    else
+        prop = i->second;
+    
+    assert(prop->type == type);
+    
+    return prop;
+}
+
+static void clearUniforms() {
+    for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
+        auto prop = i->second;
+        if (isOpenGLDevice(s_DeviceType)) {
+            prop->uniformIndex = ShaderProp::UNIFORM_UNSET;
+        }
+#endif
+        
+    }
+    
+    shaderProps.clear();
+}
+
+static void updateUniforms() {
+    for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
+        auto prop = i->second;
+        
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_LEGACY
+        if (isOpenGLDevice(s_DeviceType)) {
+            if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
+                continue;
+            if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
+                prop->uniformIndex = glGetUniformLocation(g_Program, prop->name.c_str());
+                if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID) {
+                    std::stringstream ss; ss << "invalid uniform: " << prop->name;
+                    std::string s(ss.str());
+                    Debug(s.c_str());
+                    continue;
+                }
+                assert(prop->uniformIndex != ShaderProp::UNIFORM_UNSET);
+            }
+            switch (prop->type) {
+                case Float:
+                    glUniform1f(prop->uniformIndex, prop->value[0]);
+                    break;
+                case Vector2:
+                    glUniform2f(prop->uniformIndex, prop->value[0], prop->value[1]);
+                    break;
+                case Vector3:
+                    glUniform3f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2]);
+                    break;
+                case Vector4:
+                    glUniform4f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2], prop->value[3]);
+                    break;
+                case Matrix: {
+                    const int numElements = 1;
+                    const bool transpose = GL_FALSE;
+                    glUniformMatrix4fv(prop->uniformIndex, numElements, transpose, prop->value);
+                    break;
+                }
+                default:
+                    assert(false);
+            }
+            std::stringstream ss;
+            ss << "updated uniform " << i->second->name << " with index " << i->second->uniformIndex;
+            std::string s = ss.str();
+            Debug(s.c_str());
+
+        }
+#endif
+    }
+}
+
 extern "C" {
 
-UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp)
-{
+UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
     _DebugFunc = fp;
-	if (fp) {
-		return 11;
-	}
-	else {
-		return 13;
-	}
+    return 0;
+}
+
+UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
+    auto prop = propForName(name, Vector4);
+    memcpy(prop->value, value, sizeof(float) * 4);
+}
+
+UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
+    auto prop = propForName(name, Float);
+    memcpy(prop->value, &value, sizeof(float) * 1);
+}
+
+UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
+    auto prop = propForName(name, Matrix);
+    memcpy(prop->value, value, sizeof(float) * 16);
+}
+    
+UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
+    memcpy(propForName(name, Vector4)->value, value, sizeof(float) * 4);
+}
+
+UNITY_INTERFACE_EXPORT void Reset() {
+  didInit = false;
 }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* pixelShader, const char* vertexShader) {
-    //
     // TODO: threadsafe
-    //
     if (pixelShader != nullptr) {
         newFragShaderText = pixelShader;
         newFragShader = true;
@@ -1400,11 +1546,11 @@ extern "C"  UNITY_INTERFACE_EXPORT  const char* GetDebugInfo() {
 #endif
 #if SUPPORT_OPENGL_LEGACY
 		// OpenGL 2 legacy case (deprecated)
-		if (s_DeviceType == kUnityGfxRendererOpenGL)
-			WAT("OpenGL 2 Legacy");
+    if (s_DeviceType == kUnityGfxRendererOpenGL)
+        WAT("OpenGL 2 Legacy");
 #endif
 #if SUPPORT_OPENGL_UNIFIED
-		if (s_DeviceType == kUnityGfxRendererOpenGLES20)
+    if (s_DeviceType == kUnityGfxRendererOpenGLES20)
       WAT("OpenGL ES 2.0");
 
     if (s_DeviceType == kUnityGfxRendererOpenGLES30)
