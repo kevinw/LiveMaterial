@@ -1,14 +1,22 @@
+#define	D3D_DEBUG_INFO
 #include "RenderingPlugin.h"
 #include "Unity/IUnityGraphics.h"
 
+#if SUPPORT_D3D9 || SUPPORT_D3D11 || SUPPORT_D3D12
+#include "dxerr.h"
+#endif
+
+//#include <regex>
 #include <sstream>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <vector>
 #include <string>
+#include <fstream>
 
 #define NUM_VERTS 6
+
 
 // --------------------------------------------------------------------------
 // Include headers for the graphics APIs we support
@@ -26,9 +34,6 @@
 #	include "Unity/IUnityGraphicsD3D12.h"
 #endif
 
-#if SUPPORT_OPENGL_LEGACY
-//#	include "OpenGL/glew.h"
-#endif
 #if SUPPORT_OPENGL_UNIFIED
 #	if UNITY_IPHONE
 #		include <OpenGLES/ES2/gl.h>
@@ -61,6 +66,12 @@ UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value);
 // Helper utilities
 
 
+static void writeTextToFile(const char* filename, const char* text) {
+	std::ofstream debugOut;
+	debugOut.open(filename);
+	debugOut << text;
+	debugOut.close();
+}
 
 // Prints a string
 static void DebugLog (const char* str)
@@ -76,7 +87,6 @@ static void DebugLog (const char* str)
 #ifndef SAFE_RELEASE
 #define SAFE_RELEASE(a) if (a) { a->Release(); a = NULL; }
 #endif
-
 
 //-----------------------------------------------------------------
 // Print for OpenGL errors
@@ -148,6 +158,7 @@ enum
 // --------------------------------------------------------------------------
 // SetUnityStreamingAssetsPath, an example function we export which is called by one of the scripts.
 
+static std::string shaderIncludePath;
 static std::string s_UnityStreamingAssetsPath;
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetUnityStreamingAssetsPath(const char* path)
 {
@@ -160,9 +171,6 @@ static void INIT_MESSAGE(const char* msg) {
         Debug(msg);
     }
 }
-
-
-
 
 // --------------------------------------------------------------------------
 // UnitySetInterfaces
@@ -188,8 +196,6 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
 	s_Graphics->UnregisterDeviceEventCallback(OnGraphicsDeviceEvent);
 }
 
-
-
 // --------------------------------------------------------------------------
 // GraphicsDeviceEvent
 
@@ -206,8 +212,6 @@ static void DoEventGraphicsDeviceD3D12(UnityGfxDeviceEventType eventType);
 #if SUPPORT_OPENGL_UNIFIED
 static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType);
 #endif
-
-
 
 static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
 {
@@ -268,7 +272,6 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 }
 
 
-
 // --------------------------------------------------------------------------
 // OnRenderEvent
 // This will be called for GL.IssuePluginEvent script calls; eventID will
@@ -302,7 +305,7 @@ static GLuint	g_ArrayBuffer;
 static void LinkProgram();
 
 #if SUPPORT_D3D11
-HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob);
+HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob);
 #endif
 
 static void MaybeLoadNewShaders();
@@ -404,7 +407,7 @@ bool LoadFileIntoBuffer(const std::string& fileName, Buffer& data)
 
 #if SUPPORT_D3D9
 
-static IDirect3DDevice9* g_D3D9Device;
+static IDirect3DDevice9* g_D3D9Device = nullptr;
 
 // A dynamic vertex buffer just to demonstrate how to handle D3D9 device resets.
 static IDirect3DVertexBuffer9* g_D3D9DynamicVB;
@@ -458,12 +461,12 @@ static D3D11_INPUT_ELEMENT_DESC s_DX11InputElementDesc[] = {
 
 static bool EnsureD3D11ResourcesAreCreated()
 {
-	if (g_D3D11VertexShader)
-		return true;
-
 	// D3D11 has to load resources. Wait for Unity to provide the streaming assets path first.
 	if (s_UnityStreamingAssetsPath.empty())
 		return false;
+
+	if (g_D3D11BlendState)
+		return true;
 
 	D3D11_BUFFER_DESC desc;
 	memset (&desc, 0, sizeof(desc));
@@ -480,33 +483,6 @@ static bool EnsureD3D11ResourcesAreCreated()
 	desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	desc.CPUAccessFlags = 0;
 	g_D3D11Device->CreateBuffer (&desc, NULL, &g_D3D11CB);
-
-
-	HRESULT hr = -1;
-	Buffer vertexShader;
-	Buffer pixelShader;
-	std::string vertexShaderPath(s_UnityStreamingAssetsPath);
-	vertexShaderPath += "/Shaders/DX11_9_1/SimpleVertexShader.cso";
-	std::string fragmentShaderPath(s_UnityStreamingAssetsPath);
-	fragmentShaderPath += "/Shaders/DX11_9_1/SimplePixelShader.cso";
-	LoadFileIntoBuffer(vertexShaderPath, vertexShader);
-	LoadFileIntoBuffer(fragmentShaderPath, pixelShader);
-
-	if (vertexShader.size() > 0 && pixelShader.size() > 0) {
-		hr = g_D3D11Device->CreateVertexShader(&vertexShader[0], vertexShader.size(), nullptr, &g_D3D11VertexShader);
-		if (FAILED(hr)) Debug("Failed to create vertex shader.\n");
-		hr = g_D3D11Device->CreatePixelShader(&pixelShader[0], pixelShader.size(), nullptr, &g_D3D11PixelShader);
-		if (FAILED(hr)) Debug("Failed to create pixel shader.\n");
-	}
-	else
-	{
-		Debug("Failed to load vertex or pixel shader.\n");
-	}
-	// input layout
-	if (g_D3D11VertexShader && vertexShader.size() > 0)
-	{
-		g_D3D11Device->CreateInputLayout (s_DX11InputElementDesc, 2, &vertexShader[0], vertexShader.size(), &g_D3D11InputLayout);
-	}
 
 	// render states
 	D3D11_RASTERIZER_DESC rsdesc;
@@ -564,6 +540,14 @@ static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 	}
 }
 
+static std::string patchVertexShader(std::string vert) {
+	return vert;
+	//std::string s("there is a subsequence in the string\n");
+	//std::regex e(":\\s*SV_(Vertex|Target)");
+									   // using string/c-string (3) version:
+	//return std::regex_replace(vert, e, "");
+}
+
 #endif // #if SUPPORT_D3D11
 
 #define isOpenGLDevice(d) (d == kUnityGfxRendererOpenGLES20 || \
@@ -576,7 +560,7 @@ static void MaybeLoadNewShaders() {
     if (!newFragShader || !newVertShader)
         return;
     
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
+#if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
         if (newFragShader) {
             newFragShader = false;
@@ -608,34 +592,64 @@ static void MaybeLoadNewShaders() {
     // D3D11 case
     if (s_DeviceType == kUnityGfxRendererD3D11)
     {
-        ID3DBlob *PS = nullptr;
-        ID3DBlob *error = nullptr;
-        HRESULT hr = -1;
-        const char* filename = "dummyfilename.cso";
-        const char* profile = "ps_5_0";
-        hr = CompileShader(newFragShaderText.c_str(), filename, newFragEntryPoint.c_str(), profile, &PS, &error);
-        if (FAILED(hr)) {
-            Debug("Could not compile shader");
-            if (error) {
-                std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
-                Debug("error blob:");
-                Debug(errstr.c_str());
-            }
-            else {
-                Debug("..and no error blob :(");
-            }
-            
-            
-        } else {
-            if (PS && PS->GetBufferPointer()) {
-                hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
-                if (FAILED(hr)) {
-                    Debug("Failed to create pixel shader.\n");
-                }
-            } else {
-                Debug("pointer was null");
-            }
-        }
+		std::string filename = shaderIncludePath + "\\dummyfilename.cso";
+        
+		HRESULT hr = -1;
+
+		{
+			ID3DBlob *PS = nullptr;
+			ID3DBlob *error = nullptr;
+			newFragShader = false;
+
+			const D3D_SHADER_MACRO defines[] = {
+				"FRAGMENT", "1",
+				NULL, NULL
+			};
+
+			hr = CompileShader(newFragShaderText.c_str(), filename.c_str(), newFragEntryPoint.c_str(), "ps_5_0", defines, &PS, &error);
+			if (FAILED(hr)) {
+				Debug("Could not compile fragment shader");
+				if (error) {
+					std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
+					Debug(errstr.c_str());
+					error->Release();
+				}
+			} else {
+				g_D3D11PixelShader = nullptr;
+				hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
+				if (FAILED(hr)) Debug("Failed to create pixel shader.\n");				
+			}
+		}
+
+		{
+			ID3DBlob *VS = nullptr;
+			ID3DBlob *error = nullptr;
+			newVertShader = false;
+			newVertShaderText = patchVertexShader(newVertShaderText);
+
+			const D3D_SHADER_MACRO defines[] = {
+				"VERTEX", "1",
+				NULL, NULL
+			};
+			
+			writeTextToFile("c:\\users\\kevnando\\Desktop\\last_vertex_shader.hlsl", newVertShaderText.c_str());
+			hr = CompileShader(newVertShaderText.c_str(), filename.c_str(), newVertEntryPoint.c_str(), "vs_5_0", defines, &VS, &error);
+			if (FAILED(hr)) {
+				Debug("Could not compile vertex shader");
+				if (error) {
+					std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
+					Debug(errstr.c_str());
+					error->Release();
+				}
+			} else {
+				g_D3D11VertexShader = nullptr;
+				hr = g_D3D11Device->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), nullptr, &g_D3D11VertexShader);
+				if (FAILED(hr)) {
+					Debug("Failed to create vertex shader");
+				} else if (g_D3D11VertexShader)
+					g_D3D11Device->CreateInputLayout(s_DX11InputElementDesc, 2, VS->GetBufferPointer(), VS->GetBufferSize(), &g_D3D11InputLayout);
+			}
+		}
     }
 #endif
 }
@@ -758,9 +772,6 @@ static void DoEventGraphicsDeviceD3D12(UnityGfxDeviceEventType eventType)
 #if SUPPORT_OPENGL_UNIFIED
 
 
-#include <fstream>
-
-
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
 {
    GLuint shader;
@@ -774,12 +785,8 @@ GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
    	return 0;
    }
     
-    if (debugOutPath) {
-        std::ofstream debugOut;
-        debugOut.open(debugOutPath);
-        debugOut << shaderSrc;
-        debugOut.close();
-    }
+   if (debugOutPath)
+	   writeTextToFile(debugOutPath, shaderSrc);
     
     std::string s = "GLSL Version ";
     s += (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION);
@@ -959,22 +966,6 @@ static void SetDefaultGraphicsState ()
 	}
 	#endif
 
-
-	#if SUPPORT_OPENGL_LEGACY
-	// OpenGL 2 legacy case (deprecated)
-	if (s_DeviceType == kUnityGfxRendererOpenGL)
-	{
-		glDisable (GL_CULL_FACE);
-		glDisable (GL_LIGHTING);
-		glDisable (GL_BLEND);
-		glDisable (GL_ALPHA_TEST);
-		glDepthFunc (GL_LEQUAL);
-		glEnable (GL_DEPTH_TEST);
-		glDepthMask (GL_FALSE);
-	}
-	#endif
-	
-	
 	#if SUPPORT_OPENGL_UNIFIED
 	// OpenGL ES / core case
 	if (s_DeviceType == kUnityGfxRendererOpenGLES20 ||
@@ -1029,9 +1020,6 @@ static void FillTextureFromCode (int width, int height, int stride, unsigned cha
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
 {
 	// Does actual rendering of a simple triangle
-  //
-
-
 	#if SUPPORT_D3D9
 	// D3D9 case
 	if (s_DeviceType == kUnityGfxRendererD3D9)
@@ -1080,7 +1068,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 	#if SUPPORT_D3D11
 	// D3D11 case
-	if (s_DeviceType == kUnityGfxRendererD3D11 && EnsureD3D11ResourcesAreCreated())
+	if (s_DeviceType == kUnityGfxRendererD3D11 && EnsureD3D11ResourcesAreCreated() && g_D3D11VertexShader && g_D3D11PixelShader)
 	{
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
@@ -1122,9 +1110,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		ctx->Release();
 	}
 	#endif
-
-
-
+	
 	#if SUPPORT_D3D12
 	// D3D12 case
 	if (s_DeviceType == kUnityGfxRendererD3D12)
@@ -1203,47 +1189,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 	}
 	#endif
 
-	#if SUPPORT_OPENGL_LEGACY
-	// OpenGL 2 legacy case (deprecated)
-	if (s_DeviceType == kUnityGfxRendererOpenGL)
-	{
-		// Transformation matrices
-		glMatrixMode (GL_MODELVIEW);
-		glLoadMatrixf (worldMatrix);
-		glMatrixMode (GL_PROJECTION);
-		// Tweak the projection matrix a bit to make it match what identity
-		// projection would do in D3D case.
-		projectionMatrix[10] = 2.0f;
-		projectionMatrix[14] = -1.0f;
-		glLoadMatrixf (projectionMatrix);
-
-		// Vertex layout
-		glVertexPointer (NUM_VERTS, GL_FLOAT, sizeof(verts[0]), &verts[0].x);
-		glEnableClientState (GL_VERTEX_ARRAY);
-		glColorPointer (4, GL_UNSIGNED_BYTE, sizeof(verts[0]), &verts[0].color);
-		glEnableClientState (GL_COLOR_ARRAY);
-
-		// Draw!
-		glDrawArrays (GL_TRIANGLES, 0, NUM_VERTS);
-
-		// update native texture from code
-		if (g_TexturePointer)
-		{
-			GLuint gltex = (GLuint)(size_t)(g_TexturePointer);
-			glBindTexture (GL_TEXTURE_2D, gltex);
-			int texWidth, texHeight;
-			glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &texWidth);
-			glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &texHeight);
-
-			unsigned char* data = new unsigned char[texWidth*texHeight*4];
-			FillTextureFromCode (texWidth, texHeight, texHeight*4, data);
-			glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, texWidth, texHeight, GL_RGBA, GL_UNSIGNED_BYTE, data);
-			delete[] data;
-		}
-	}
-	#endif
-	
-	
 	
 	#if SUPPORT_OPENGL_UNIFIED
 	#define BUFFER_OFFSET(i) ((char *)NULL + (i))
@@ -1340,7 +1285,7 @@ struct ShaderProp {
     : type(type_)
     , name(name_)
     {
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_LEGACY
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
         uniformIndex = UNIFORM_UNSET;
 #endif
     }
@@ -1349,7 +1294,7 @@ struct ShaderProp {
     std::string name;
     float value[16];
     
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_LEGACY
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
     static const int UNIFORM_UNSET = -2;
     static const int UNIFORM_INVALID = -1;
     int uniformIndex;
@@ -1383,7 +1328,7 @@ static void printUniforms() {
     for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
         auto prop = i->second;
         ss << prop->name << " ";
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
+#if SUPPORT_OPENGL_UNIFIED
         if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
             ss << "(INVALID) ";
 #endif
@@ -1408,7 +1353,7 @@ static void printUniforms() {
 
 static void clearUniforms() {
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_LEGACY
+#if SUPPORT_OPENGL_UNIFIED
         auto prop = i->second;
         if (isOpenGLDevice(s_DeviceType)) {
             prop->uniformIndex = ShaderProp::UNIFORM_UNSET;
@@ -1427,7 +1372,7 @@ static void updateUniforms() {
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
         
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE || SUPPORT_OPENGL_LEGACY
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
         if (isOpenGLDevice(s_DeviceType)) {
             if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
                 continue;
@@ -1507,6 +1452,9 @@ UNITY_INTERFACE_EXPORT void PrintUniforms() {
     printUniforms();
 }
 
+UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) {
+	shaderIncludePath = includePath;
+}
     
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {
     // TODO: threadsafe
@@ -1517,7 +1465,7 @@ UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* 
     }
     if (vertexShader != nullptr) {
         newVertShaderText = vertexShader;
-        newVertEntryPoint = fragEntryPoint;
+        newVertEntryPoint = vertEntryPoint;
         newVertShader = true;
     }
 }
@@ -1538,11 +1486,6 @@ extern "C"  UNITY_INTERFACE_EXPORT  const char* GetDebugInfo() {
 #if SUPPORT_D3D12
 		if (s_DeviceType == kUnityGfxRendererD3D12)
 			WAT("D3D12");
-#endif
-#if SUPPORT_OPENGL_LEGACY
-		// OpenGL 2 legacy case (deprecated)
-    if (s_DeviceType == kUnityGfxRendererOpenGL)
-        WAT("OpenGL 2 Legacy");
 #endif
 #if SUPPORT_OPENGL_UNIFIED
     if (s_DeviceType == kUnityGfxRendererOpenGLES20)

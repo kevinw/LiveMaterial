@@ -50,7 +50,7 @@ void test()
 */
 
 
-HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob)
+HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob)
 {
 	if (!src || !srcName || !entryPoint || !profile || !blob)
 		return E_INVALIDARG;
@@ -58,15 +58,12 @@ HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR ent
 	*blob = nullptr;
 	*errorBlob = nullptr;
 
-	UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
-#if defined( DEBUG ) || defined( _DEBUG )
-	flags |= D3DCOMPILE_DEBUG;
-#endif
+	UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;// D3DCOMPILE_ENABLE_STRICTNESS;
+//#if defined( DEBUG ) || defined( _DEBUG )
+//	flags |= D3DCOMPILE_DEBUG;
+//#endif
 
-	const D3D_SHADER_MACRO defines[] = {
-		"EXAMPLE_DEFINE", "1",
-		NULL, NULL
-	};
+
 
 	ID3DBlob* shaderBlob = nullptr;
 	HRESULT hr = D3DCompile(src, strlen(src), srcName, defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
