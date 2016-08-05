@@ -1307,10 +1307,12 @@ struct ShaderProp {
     
 };
 
-#include <map>
-
 typedef std::map<std::string, ShaderProp*> PropMap;
 PropMap shaderProps;
+
+static bool hasProp(const char* name) {
+    return shaderProps.find(name) != shaderProps.end();
+}
 
 static ShaderProp* propForName(const char* name, PropType type) {
     ShaderProp* prop = nullptr;
@@ -1433,6 +1435,11 @@ UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
     auto prop = propForName(name, Vector4);
     memcpy(prop->value, value, sizeof(float) * 4);
 }
+    
+    UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
+        auto prop = propForName(name, Vector4);
+        memcpy(value, prop->value, sizeof(float) * 4);
+    }
 
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
     auto prop = propForName(name, Float);
@@ -1447,6 +1454,14 @@ UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
 UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
     memcpy(propForName(name, Vector4)->value, value, sizeof(float) * 4);
 }
+    
+    UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
+        return propForName(name, Float)->value[0];
+    }
+    
+    UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) {
+        return hasProp(name);
+    }
 
 UNITY_INTERFACE_EXPORT void Reset() {
   didInit = false;
