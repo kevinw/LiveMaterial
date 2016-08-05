@@ -14,6 +14,9 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <map>
+
+#include "ProducerConsumerQueue.h"
 
 #define NUM_VERTS 6
 
@@ -57,6 +60,18 @@ static bool didInit = false;
 static void updateUniforms();
 static void clearUniforms();
 static void printUniforms();
+
+struct ShaderSource {
+    std::string fragShader;
+    std::string fragEntryPoint;
+    
+    std::string vertShader;
+    std::string vertEntryPoint;
+};
+
+folly::ProducerConsumerQueue<ShaderSource> shaderSourceQueue(10);
+
+
 
 extern "C" {
 UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value);
@@ -286,15 +301,6 @@ struct MyVertex {
 };
 static void SetDefaultGraphicsState ();
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts);
-
-static std::string newFragShaderText;
-static std::string newFragEntryPoint;
-static bool newFragShader = false;
-
-static std::string newVertShaderText;
-static std::string newVertEntryPoint;
-static bool newVertShader = false;
-
 
 static GLuint	g_VProg   = 0;
 static GLuint	g_FShader = 0;
@@ -556,30 +562,28 @@ static std::string patchVertexShader(std::string vert) {
     d == kUnityGfxRendererOpenGL)
 
 static void MaybeLoadNewShaders() {
-    
-    if (!newFragShader || !newVertShader)
+    ShaderSource shaderSource;
+    if (!shaderSourceQueue.read(shaderSource))
         return;
+
+    std::stringstream ss; ss << "Loading new shaders " << g_Time;
+    std::string s(ss.str());
+    Debug(s.c_str());
     
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
-        if (newFragShader) {
-            newFragShader = false;
-            GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, newFragShaderText.c_str(), "/Users/kevin/Desktop/last_shader.frag");
-            if (newFrag) {
-                if (g_FShader)
-                    glDeleteShader(g_FShader);
-                g_FShader = newFrag;
-            }
+        GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), "/Users/kevin/Desktop/last_shader.frag");
+        if (newFrag) {
+            if (g_FShader)
+                glDeleteShader(g_FShader);
+            g_FShader = newFrag;
         }
         
-        if (newVertShader) {
-            newVertShader = false;
-            GLuint newVert = loadShader(GL_VERTEX_SHADER, newVertShaderText.c_str(), "/Users/kevin/Desktop/last_shader.vert");
-            if (newVert) {
-                if (g_VProg)
-                    glDeleteShader(g_VProg);
-                g_VProg = newVert;
-            }
+        GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), "/Users/kevin/Desktop/last_shader.vert");
+        if (newVert) {
+            if (g_VProg)
+                glDeleteShader(g_VProg);
+            g_VProg = newVert;
         }
 
         LinkProgram();
@@ -606,7 +610,7 @@ static void MaybeLoadNewShaders() {
 				NULL, NULL
 			};
 
-			hr = CompileShader(newFragShaderText.c_str(), filename.c_str(), newFragEntryPoint.c_str(), "ps_5_0", defines, &PS, &error);
+			hr = CompileShader(shaderSource.fragShader.c_str(), filename.c_str(), shaderSource.fragEntryPoint.c_str(), "ps_5_0", defines, &PS, &error);
 			if (FAILED(hr)) {
 				Debug("Could not compile fragment shader");
 				if (error) {
@@ -625,15 +629,15 @@ static void MaybeLoadNewShaders() {
 			ID3DBlob *VS = nullptr;
 			ID3DBlob *error = nullptr;
 			newVertShader = false;
-			newVertShaderText = patchVertexShader(newVertShaderText);
+			shaderSource.vertShader = patchVertexShader(shaderSource.vertShader);
 
 			const D3D_SHADER_MACRO defines[] = {
 				"VERTEX", "1",
 				NULL, NULL
 			};
 			
-			writeTextToFile("c:\\users\\kevnando\\Desktop\\last_vertex_shader.hlsl", newVertShaderText.c_str());
-			hr = CompileShader(newVertShaderText.c_str(), filename.c_str(), newVertEntryPoint.c_str(), "vs_5_0", defines, &VS, &error);
+			writeTextToFile("c:\\users\\kevnando\\Desktop\\last_vertex_shader.hlsl", shaderSource.vertShader.c_str());
+			hr = CompileShader(shaderSource.vertShader.c_str(), filename.c_str(), shaderSource.vertEntryPoint.c_str(), "vs_5_0", defines, &VS, &error);
 			if (FAILED(hr)) {
 				Debug("Could not compile vertex shader");
 				if (error) {
@@ -1455,51 +1459,24 @@ UNITY_INTERFACE_EXPORT void PrintUniforms() {
 UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) {
 	shaderIncludePath = includePath;
 }
-    
+
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {
-    // TODO: threadsafe
-    if (fragShader != nullptr) {
-        newFragShaderText = fragShader;
-        newFragEntryPoint = fragEntryPoint;
-        newFragShader = true;
+    
+    if (fragShader == nullptr) {
+        Debug("fragShader was null");
+        return;
     }
-    if (vertexShader != nullptr) {
-        newVertShaderText = vertexShader;
-        newVertEntryPoint = vertEntryPoint;
-        newVertShader = true;
+    if (vertexShader == nullptr) {
+        Debug("vertShader was null");
+        return;
     }
+    
+    ShaderSource shaderSource;
+    shaderSource.fragShader = fragShader;
+    shaderSource.fragEntryPoint = fragEntryPoint;
+    shaderSource.vertShader = vertexShader;
+    shaderSource.vertEntryPoint = vertEntryPoint;
+    if (!shaderSourceQueue.write(shaderSource))
+        Debug("could not write to shader queue");
 }
-
-static char buf[2048];
-extern "C"  UNITY_INTERFACE_EXPORT  const char* GetDebugInfo() {
-	
-#define WAT(m) do { snprintf(buf, 2048, "%s", m); return buf; } while (0);
-
-#if SUPPORT_D3D9
-		if (s_DeviceType == kUnityGfxRendererD3D9)
-			WAT("D3D9");
-#endif
-#if SUPPORT_D3D11
-		if (s_DeviceType == kUnityGfxRendererD3D11)
-			WAT("D3D11");
-#endif
-#if SUPPORT_D3D12
-		if (s_DeviceType == kUnityGfxRendererD3D12)
-			WAT("D3D12");
-#endif
-#if SUPPORT_OPENGL_UNIFIED
-    if (s_DeviceType == kUnityGfxRendererOpenGLES20)
-      WAT("OpenGL ES 2.0");
-
-    if (s_DeviceType == kUnityGfxRendererOpenGLES30)
-      WAT("OpenGL ES 3.0");
-
-    if (s_DeviceType == kUnityGfxRendererOpenGLCore)
-      WAT("OpenGL Core");
-#endif
-
-	WAT("UNKNOWN DEVICE");
-}
-	
-
 }
