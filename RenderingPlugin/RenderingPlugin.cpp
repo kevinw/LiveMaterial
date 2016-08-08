@@ -599,7 +599,6 @@ static void MaybeLoadNewShaders() {
 		{
 			ID3DBlob *PS = nullptr;
 			ID3DBlob *error = nullptr;
-			newFragShader = false;
 
 			const D3D_SHADER_MACRO defines[] = {
 				"FRAGMENT", "1",
@@ -624,7 +623,6 @@ static void MaybeLoadNewShaders() {
 		{
 			ID3DBlob *VS = nullptr;
 			ID3DBlob *error = nullptr;
-			newVertShader = false;
 			shaderSource.vertShader = patchVertexShader(shaderSource.vertShader);
 
 			const D3D_SHADER_MACRO defines[] = {
