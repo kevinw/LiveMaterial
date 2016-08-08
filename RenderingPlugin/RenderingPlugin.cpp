@@ -3,6 +3,10 @@
 #include "Unity/IUnityGraphics.h"
 
 #if SUPPORT_D3D9 || SUPPORT_D3D11 || SUPPORT_D3D12
+#define SUPPORT_D3D
+#define INITGUID // todo: what to link against to get IID_ID3D11ShaderReflection?
+#include <d3d11shader.h>
+#include <d3dcompiler.h>
 #include "dxerr.h"
 #endif
 
@@ -20,6 +24,10 @@
 
 #define NUM_VERTS 6
 
+#ifdef SUPPORT_D3D
+struct ShaderProp;
+static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
+#endif
 
 // --------------------------------------------------------------------------
 // Include headers for the graphics APIs we support
@@ -56,6 +64,8 @@ typedef void (*FuncPtr)( const char * );
 FuncPtr _DebugFunc = nullptr;
 #define Debug(m) do { if (_DebugFunc) _DebugFunc(m); } while(0);
 
+static bool verbose = false;
+
 #define DebugSS(ssexp) do { \
     if (_DebugFunc) { \
         std::stringstream ss; ss << ssexp; std::string s(ss.str()); _DebugFunc(s.c_str()); \
@@ -63,7 +73,10 @@ FuncPtr _DebugFunc = nullptr;
 } while(0);
 
 static bool didInit = false;
-static void updateUniforms();
+#if SUPPORT_D3D11
+static void updateUniformsD3D11(ID3D11DeviceContext* ctx);
+#endif
+static void updateUniformsGL();
 static void clearUniforms();
 static void printUniforms();
 
@@ -455,7 +468,10 @@ static void DoEventGraphicsDeviceD3D9(UnityGfxDeviceEventType eventType)
 
 static ID3D11Device* g_D3D11Device = NULL;
 static ID3D11Buffer* g_D3D11VB = NULL; // vertex buffer
-static ID3D11Buffer* g_D3D11CB = NULL; // constant buffer
+
+static ID3D11Buffer* d3d11ConstantBuffer = NULL; // constant buffer
+static UINT d3d11ConstantBufferSize = 0; // ByteWidth of constant buffer
+
 static ID3D11VertexShader* g_D3D11VertexShader = NULL;
 static ID3D11PixelShader* g_D3D11PixelShader = NULL;
 static ID3D11InputLayout* g_D3D11InputLayout = NULL;
@@ -486,12 +502,6 @@ static bool EnsureD3D11ResourcesAreCreated()
 	desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 	g_D3D11Device->CreateBuffer (&desc, NULL, &g_D3D11VB);
 
-	// constant buffer
-	desc.Usage = D3D11_USAGE_DEFAULT;
-	desc.ByteWidth = 64; // hold 1 matrix
-	desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	desc.CPUAccessFlags = 0;
-	g_D3D11Device->CreateBuffer (&desc, NULL, &g_D3D11CB);
 
 	// render states
 	D3D11_RASTERIZER_DESC rsdesc;
@@ -518,14 +528,10 @@ static bool EnsureD3D11ResourcesAreCreated()
 }
 
 
-
-
-
-
 static void ReleaseD3D11Resources()
 {
 	SAFE_RELEASE(g_D3D11VB);
-	SAFE_RELEASE(g_D3D11CB);
+	SAFE_RELEASE(d3d11ConstantBuffer);
 	SAFE_RELEASE(g_D3D11VertexShader);
 	SAFE_RELEASE(g_D3D11PixelShader);
 	SAFE_RELEASE(g_D3D11InputLayout);
@@ -556,6 +562,96 @@ static std::string patchVertexShader(std::string vert) {
 									   // using string/c-string (3) version:
 	//return std::regex_replace(vert, e, "");
 }
+
+static std::string toString(const WCHAR* wbuf) {
+	std::wstring wstr(wbuf);
+	std::string str(wstr.begin(), wstr.end());
+	return str;
+}
+
+static void DebugHR(HRESULT hr) {
+	assert(FAILED(hr));
+
+	std::stringstream ss;
+	ss << toString(DXGetErrorString(hr));
+
+	const int maxSize = 1024;
+	WCHAR buf[maxSize];
+	DXGetErrorDescription(hr, (WCHAR*)&buf, maxSize);
+
+	ss << ": " << toString(buf);
+
+	Debug(ss.str().c_str());
+}
+
+static int roundUp(int numToRound, int multiple) {
+	assert(multiple);
+	int isPositive = (int)(numToRound >= 0);
+	return ((numToRound + isPositive * (multiple - 1)) / multiple) * multiple;
+}
+
+void constantBufferReflect(ID3DBlob* shader)
+{
+	HRESULT hr;
+	ID3D11ShaderReflection* pReflector = NULL;
+
+	hr = D3DReflect(shader->GetBufferPointer(),
+		shader->GetBufferSize(),
+		IID_ID3D11ShaderReflection, // See top of file: #define INITGUID //need to add this to get the shader reflection library working
+		(void**)&pReflector);
+
+	D3D11_SHADER_DESC desc;
+	pReflector->GetDesc(&desc);
+
+	std::stringstream fout;
+	fout << "Reflecting Constant Buffers (" << desc.ConstantBuffers << ")\n";
+
+	assert(desc.ConstantBuffers == 1);
+	for (UINT i = 0; i < desc.ConstantBuffers; i++)
+	{
+		D3D11_SHADER_BUFFER_DESC Description;
+		ID3D11ShaderReflectionConstantBuffer* pConstBuffer = pReflector->GetConstantBufferByIndex(i);
+		pConstBuffer->GetDesc(&Description);
+
+		d3d11ConstantBufferSize = 0;
+
+		for (UINT j = 0; j < Description.Variables; j++) {
+			ID3D11ShaderReflectionVariable* pVariable = pConstBuffer->GetVariableByIndex(j);
+			D3D11_SHADER_VARIABLE_DESC var_desc;
+			pVariable->GetDesc(&var_desc);
+			fout << " Name: " << var_desc.Name;
+			fout << " Size: " << var_desc.Size;
+			fout << " Offset: " << var_desc.StartOffset << "\n";
+
+			// mark the prop's name, size and offset
+			propForNameSizeOffset(var_desc.Name, var_desc.Size, var_desc.StartOffset);
+
+			d3d11ConstantBufferSize = max(d3d11ConstantBufferSize, var_desc.StartOffset + var_desc.Size);
+		}
+		
+		d3d11ConstantBufferSize = roundUp(d3d11ConstantBufferSize, 16);
+		DebugSS("Allocating a constant buffer with size " << d3d11ConstantBufferSize);
+
+		// constant buffer
+		D3D11_BUFFER_DESC bufdesc;
+		memset(&bufdesc, 0, sizeof(bufdesc));
+		bufdesc.Usage = D3D11_USAGE_DYNAMIC;
+		bufdesc.ByteWidth = d3d11ConstantBufferSize;
+		bufdesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		bufdesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+		SAFE_RELEASE(d3d11ConstantBuffer);
+
+		HRESULT hr = g_D3D11Device->CreateBuffer(&bufdesc, NULL, &d3d11ConstantBuffer);
+		if (FAILED(hr)) {
+			DebugHR(hr);
+			Debug("ERROR: could not create constant buffer");
+		}
+	}
+	
+	Debug(fout.str().c_str());
+}
+
 
 #endif // #if SUPPORT_D3D11
 
@@ -622,6 +718,7 @@ static void MaybeLoadNewShaders() {
 				}
 			} else {
 				g_D3D11PixelShader = nullptr;
+				constantBufferReflect(PS);
 				hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
 				if (FAILED(hr)) Debug("Failed to create pixel shader.\n");				
 			}
@@ -1073,17 +1170,17 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 	#if SUPPORT_D3D11
 	// D3D11 case
-	if (s_DeviceType == kUnityGfxRendererD3D11 && EnsureD3D11ResourcesAreCreated() && g_D3D11VertexShader && g_D3D11PixelShader)
-	{
+	if (s_DeviceType == kUnityGfxRendererD3D11 && EnsureD3D11ResourcesAreCreated() && g_D3D11VertexShader && g_D3D11PixelShader) {
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
 
-		// update constant buffer - just the world matrix in our case
-		ctx->UpdateSubresource (g_D3D11CB, 0, NULL, worldMatrix, 64, 0);
+		updateUniformsD3D11(ctx);
 
 		// set shaders
-		ctx->VSSetConstantBuffers (0, 1, &g_D3D11CB);
-		ctx->VSSetShader (g_D3D11VertexShader, NULL, 0);
+		
+		ctx->VSSetShader (g_D3D11VertexShader, NULL, 0);		
+		if (d3d11ConstantBuffer)
+			ctx->PSSetConstantBuffers(0, 1, &d3d11ConstantBuffer);
 		ctx->PSSetShader (g_D3D11PixelShader, NULL, 0);
 
 		// update vertex buffer
@@ -1208,7 +1305,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
             return;
 
 		glUseProgram(g_Program);
-        updateUniforms();
+        updateUniformsGL();
         printOpenGLError();
 
 #if SUPPORT_OPENGL_CORE
@@ -1301,12 +1398,14 @@ struct ShaderProp {
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
         uniformIndex = UNIFORM_UNSET;
 #endif
+#ifdef SUPPORT_D3D
+		offset = 0;
+		size = 0;
+#endif
     }
     
     PropType type;
-    const std::string typeString() {
-        return propTypeStrings[(size_t)type];
-    }
+    const std::string typeString() { return propTypeStrings[(size_t)type]; }
     std::string name;
     float value[16];
     
@@ -1314,6 +1413,26 @@ struct ShaderProp {
     static const int UNIFORM_UNSET = -2;
     static const int UNIFORM_INVALID = -1;
     int uniformIndex;
+#endif
+
+#ifdef SUPPORT_D3D
+	uint16_t offset;
+	uint16_t size;
+
+	static PropType typeForSize(uint16_t size) {
+		switch (size) {
+		case sizeof(float) : return Float;
+		case 2 * sizeof(float) : return Vector2;
+		case 3 * sizeof(float) : return Vector3;
+		case 4 * sizeof(float) : return Vector4;
+		case 16 * sizeof(float) : return Matrix;
+		default: {
+			DebugSS("unknown size " << size);
+			assert(false);
+			return Float;
+		}
+		}
+	}
 #endif
     
     
@@ -1326,18 +1445,39 @@ static bool hasProp(const char* name) {
     return shaderProps.find(name) != shaderProps.end();
 }
 
-static ShaderProp* propForName(const char* name, PropType type) {
-    ShaderProp* prop = nullptr;
-    PropMap::iterator i = shaderProps.find(name);
 
-    if (i != shaderProps.end())
-        prop = i->second;
-    
-    if (prop == nullptr || prop->type != type)
-        prop = shaderProps[name] = new ShaderProp(type, name);
-    
-    assert(prop->type == type);
-    
+static ShaderProp* _lookupPropByName(const char* name) {
+	auto i = shaderProps.find(name);
+	return i != shaderProps.end() ? i->second : nullptr;
+}
+
+
+#define SAFE_DELETE(x) do { if (x) delete (x); } while(0); 
+
+#ifdef SUPPORT_D3D
+static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset) {
+	auto prop = _lookupPropByName(name);
+	if (!prop || prop->size != size || prop->offset != offset) {
+		SAFE_DELETE(prop);
+		prop = shaderProps[name] = new ShaderProp(ShaderProp::typeForSize(size), name);
+		prop->size = size;
+		prop->offset = offset;		
+	} else {
+		assert(prop->size == size);
+		assert(prop->offset == offset);
+	}
+
+	return prop;
+}
+#endif
+
+static ShaderProp* propForName(const char* name, PropType type) {
+    auto prop = _lookupPropByName(name);
+	if (!prop || prop->type != type) {
+		SAFE_DELETE(prop);
+		prop = shaderProps[name] = new ShaderProp(type, name);
+	}
+    assert(prop->type == type);    
     return prop;
 }
 
@@ -1383,58 +1523,89 @@ static void clearUniforms() {
     shaderProps.clear();
 }
 
-static void updateUniforms() {
+unsigned char constantBuffer[500 * 1024];
+
+#if SUPPORT_D3D11
+static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
+	if (!d3d11ConstantBuffer) {
+		if (verbose) Debug("updateUniformsD3D11: no constant buffer");
+		return;
+	}
+
+			
+	UINT totalSize = 0;
+	int count = 0;
+	for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i)
+		if (i->second->size)
+			++count;
+
+	if (verbose) DebugSS("updateUniformsD3D11 updating " << count << " uniforms");
+	assert(d3d11ConstantBufferSize > 0);
+	memset(constantBuffer, 0, d3d11ConstantBufferSize);
+
+	for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
+		auto prop = i->second;
+		assert((int)prop->offset + (int)prop->size <= (int)d3d11ConstantBufferSize);
+		memcpy(constantBuffer + prop->offset, &prop->value, prop->size);
+		if (verbose) DebugSS("update d3d uniform " << prop->name << " at offset " << prop->offset << " with size " << prop->size);
+	}
+
+	ctx->UpdateSubresource(d3d11ConstantBuffer, 0, NULL, constantBuffer, totalSize, 0);
+}
+#endif
+
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
+static void updateUniformsGL() {
+	assert(isOpenGLDevice(s_DeviceType));
+
     if (g_Program == 0)
         return;
-#endif
     
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
-        
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
-        if (isOpenGLDevice(s_DeviceType)) {
-            if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
+       
+
+        if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
+            continue;
+        if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
+            prop->uniformIndex = glGetUniformLocation(g_Program, prop->name.c_str());
+            if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID) {
+                DebugSS("invalid uniform: " << prop->name);
                 continue;
-            if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
-                prop->uniformIndex = glGetUniformLocation(g_Program, prop->name.c_str());
-                if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID) {
-                    DebugSS("invalid uniform: " << prop->name);
-                    continue;
-                }
-                assert(prop->uniformIndex != ShaderProp::UNIFORM_UNSET);
             }
-            switch (prop->type) {
-                case Float:
-                    glUniform1f(prop->uniformIndex, prop->value[0]);
-                    break;
-                case Vector2:
-                    glUniform2f(prop->uniformIndex, prop->value[0], prop->value[1]);
-                    break;
-                case Vector3:
-                    glUniform3f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2]);
-                    break;
-                case Vector4:
-                    glUniform4f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2], prop->value[3]);
-                    break;
-                case Matrix: {
-                    const int numElements = 1;
-                    const bool transpose = GL_FALSE;
-                    glUniformMatrix4fv(prop->uniformIndex, numElements, transpose, prop->value);
-                    break;
-                }
-                default:
-                    assert(false);
-            }
-            
-            if (printOpenGLError())
-                DebugSS("error setting uniform " << prop->name << " with type " << prop->typeString() << " and uniform index " << prop->uniformIndex);
-            
-            //DebugSS("updated uniform " << i->second->name << " with index " << i->second->uniformIndex);
+            assert(prop->uniformIndex != ShaderProp::UNIFORM_UNSET);
         }
-#endif
+		switch (prop->type) {
+		case Float:
+			glUniform1f(prop->uniformIndex, prop->value[0]);
+			break;
+		case Vector2:
+			glUniform2f(prop->uniformIndex, prop->value[0], prop->value[1]);
+			break;
+		case Vector3:
+			glUniform3f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2]);
+			break;
+		case Vector4:
+			glUniform4f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2], prop->value[3]);
+			break;
+		case Matrix: {
+			const int numElements = 1;
+			const bool transpose = GL_FALSE;
+			glUniformMatrix4fv(prop->uniformIndex, numElements, transpose, prop->value);
+			break;
+		}
+		default:
+			assert(false);
+		}
+            
+        if (printOpenGLError())
+            DebugSS("error setting uniform " << prop->name << " with type " << prop->typeString() << " and uniform index " << prop->uniformIndex);
+            
+		//DebugSS("updated uniform " << i->second->name << " with index " << i->second->uniformIndex);
+   
     }
 }
+#endif
 
 extern "C" {
 
@@ -1445,30 +1616,39 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
 
 UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
     auto prop = propForName(name, Vector4);
-    memcpy(prop->value, value, sizeof(float) * 4);
+    if (prop)
+		memcpy(prop->value, value, sizeof(float) * 4);
 }
     
     UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
         auto prop = propForName(name, Vector4);
-        memcpy(value, prop->value, sizeof(float) * 4);
+		if (prop)
+	        memcpy(value, prop->value, sizeof(float) * 4);
     }
 
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
     auto prop = propForName(name, Float);
-    memcpy(prop->value, &value, sizeof(float) * 1);
+	if (prop)
+		memcpy(prop->value, &value, sizeof(float) * 1);
 }
 
 UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
     auto prop = propForName(name, Matrix);
-    memcpy(prop->value, value, sizeof(float) * 16);
+	if (prop)
+		memcpy(prop->value, value, sizeof(float) * 16);
 }
     
 UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
-    memcpy(propForName(name, Vector4)->value, value, sizeof(float) * 4);
+	auto prop = propForName(name, Vector4);
+	if (prop)
+		memcpy(prop->value, value, sizeof(float) * 4);
 }
     
     UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
-        return propForName(name, Float)->value[0];
+		auto prop = propForName(name, Float);
+		if (prop)
+			return prop->value[0];
+		return 0;
     }
     
     UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) {
@@ -1487,14 +1667,9 @@ UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) {
 	shaderIncludePath = includePath;
 }
 
-UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {
-    
-    if (fragShader == nullptr) {
-        Debug("fragShader was null");
-        return;
-    }
-    if (vertexShader == nullptr) {
-        Debug("vertShader was null");
+UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {    
+    if (!fragShader || !vertexShader) {
+        Debug("shader was null");
         return;
     }
     
@@ -1503,6 +1678,7 @@ UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* 
     shaderSource.fragEntryPoint = fragEntryPoint;
     shaderSource.vertShader = vertexShader;
     shaderSource.vertEntryPoint = vertEntryPoint;
+
     if (!shaderSourceQueue.write(shaderSource))
         Debug("could not write to shader queue");
 }

@@ -1,18 +1,21 @@
 // http://xboxforums.create.msdn.com/forums/t/32885.aspx
-#define INITGUID // todo: what to link against to get IID_ID3D11ShaderReflection?
-#include <d3d11shader.h>
+
 
 #include <d3d11.h>
+#include <cassert>
 #include <d3dcompiler.h>
 #pragma comment(lib, "d3dcompiler.lib")
 
 #include <memory>
 #include <tchar.h>
+#include <fstream>
 
 #include <vector>
 
 std::vector<D3D11_INPUT_ELEMENT_DESC> inputLayoutArray;
 ID3D11InputLayout* vertexLayout = nullptr;
+
+
 
 HRESULT enumInputLayout(ID3D11Device * d3dDevice, ID3DBlob * VSBlob)
 {
@@ -34,7 +37,7 @@ HRESULT enumInputLayout(ID3D11Device * d3dDevice, ID3DBlob * VSBlob)
 	inputLayoutArray.clear();
 	uint32_t byteOffset = 0;
 	D3D11_SIGNATURE_PARAMETER_DESC input_desc;
-	for (size_t i = 0; i < descVertex.InputParameters; ++i) {
+	for (UINT i = 0; i < descVertex.InputParameters; ++i) {
 		// get description of input parameter
 		vertReflect->GetInputParameterDesc(i, &input_desc);
 
@@ -119,11 +122,11 @@ HRESULT enumInputLayout(ID3D11Device * d3dDevice, ID3DBlob * VSBlob)
 	// you can save input_desc here (if needed)
 	}
 
-		// create input layout from previosly created description
+	// create input layout from previosly created description
 	size_t numElements = inputLayoutArray.size();
 	hr = d3dDevice->CreateInputLayout(
 		inputLayoutArray.data(),
-		numElements,
+		(UINT)numElements,
 		VSBlob->GetBufferPointer(),
 		VSBlob->GetBufferSize(),
 		&vertexLayout
