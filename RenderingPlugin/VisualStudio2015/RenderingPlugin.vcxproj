@@ -312,9 +312,6 @@ ENDLOCAL
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0_level_9_1</ShaderModel>
     </FxCompile>
   </ItemGroup>
-  <ItemGroup>
-    <None Include="..\RenderingPlugin.def" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
