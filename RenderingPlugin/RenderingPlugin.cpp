@@ -56,6 +56,12 @@ typedef void (*FuncPtr)( const char * );
 FuncPtr _DebugFunc = nullptr;
 #define Debug(m) do { if (_DebugFunc) _DebugFunc(m); } while(0);
 
+#define DebugSS(ssexp) do { \
+    if (_DebugFunc) { \
+        std::stringstream ss; ss << ssexp; std::string s(ss.str()); _DebugFunc(s.c_str()); \
+    } \
+} while(0);
+
 static bool didInit = false;
 static void updateUniforms();
 static void clearUniforms();
@@ -112,20 +118,17 @@ static void DebugLog (const char* str)
 #define printOpenGLError() printOglError(__FILE__, __LINE__)
 
 int printOglError(const char *file, int line) {
-    GLenum glErr;
-    int retCode = 0;
+    GLenum glErr = glGetError();
+    if (glErr == GL_NO_ERROR)
+        return 0;
+    
     const int SIZE = 1024 * 5;
     char buffer [SIZE];
-    
-    glErr = glGetError();
-    if (glErr != GL_NO_ERROR)
-    {
-        snprintf(buffer, SIZE, "glError in file %s @ line %d: %s\n",
-               file, line, gluErrorString(glErr));
-        Debug(buffer);
-        retCode = 1;
-    }
-    return retCode;
+
+    snprintf(buffer, SIZE, "glError in %s:%d: %s\n",
+           file, line, gluErrorString(glErr));
+    Debug(buffer);
+    return 1;
 }
 
 // --------------------------------------------------------------------------
@@ -1282,6 +1285,14 @@ enum PropType {
     Matrix
 };
 
+const std::string propTypeStrings[] = {
+    "Float",
+    "Vector2",
+    "Vector3",
+    "Vector4",
+    "Matrix"
+};
+
 struct ShaderProp {
     ShaderProp(PropType type_, std::string name_)
     : type(type_)
@@ -1293,6 +1304,9 @@ struct ShaderProp {
     }
     
     PropType type;
+    const std::string typeString() {
+        return propTypeStrings[(size_t)type];
+    }
     std::string name;
     float value[16];
     
@@ -1370,8 +1384,10 @@ static void clearUniforms() {
 }
 
 static void updateUniforms() {
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
     if (g_Program == 0)
         return;
+#endif
     
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
@@ -1383,9 +1399,7 @@ static void updateUniforms() {
             if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
                 prop->uniformIndex = glGetUniformLocation(g_Program, prop->name.c_str());
                 if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID) {
-                    //std::stringstream ss; ss << "invalid uniform: " << prop->name;
-                    //std::string s(ss.str());
-                    //Debug(s.c_str());
+                    DebugSS("invalid uniform: " << prop->name);
                     continue;
                 }
                 assert(prop->uniformIndex != ShaderProp::UNIFORM_UNSET);
@@ -1412,11 +1426,11 @@ static void updateUniforms() {
                 default:
                     assert(false);
             }
-            //std::stringstream ss;
-            //ss << "updated uniform " << i->second->name << " with index " << i->second->uniformIndex;
-            //std::string s = ss.str();
-            //Debug(s.c_str());
-
+            
+            if (printOpenGLError())
+                DebugSS("error setting uniform " << prop->name << " with type " << prop->typeString() << " and uniform index " << prop->uniformIndex);
+            
+            //DebugSS("updated uniform " << i->second->name << " with index " << i->second->uniformIndex);
         }
 #endif
     }
