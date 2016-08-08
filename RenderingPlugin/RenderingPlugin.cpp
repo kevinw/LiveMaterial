@@ -62,6 +62,7 @@ FuncPtr _DebugFunc = nullptr;
     } \
 } while(0);
 
+static bool verbose = false;
 static bool didInit = false;
 static void updateUniforms();
 static void clearUniforms();
@@ -133,10 +134,6 @@ int printOglError(const char *file, int line) {
 
 // --------------------------------------------------------------------------
 // SetTimeFromUnity, an example function we export which is called by one of the scripts.
-
-static float g_Time;
-
-extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTimeFromUnity (float t) { g_Time = t; }
 
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath);
 
@@ -569,10 +566,6 @@ static void MaybeLoadNewShaders() {
     if (!shaderSourceQueue.read(shaderSource))
         return;
 
-    std::stringstream ss; ss << "Loading new shaders " << g_Time;
-    std::string s(ss.str());
-    Debug(s.c_str());
-    
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
         GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), "/Users/kevin/Desktop/last_shader.frag");
@@ -795,9 +788,8 @@ GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
    if (debugOutPath)
 	   writeTextToFile(debugOutPath, shaderSrc);
     
-    std::string s = "GLSL Version ";
-    s += (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION);
-    Debug(s.c_str());
+    if (verbose)
+      DebugSS("GLSL Version " << (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
     
    // Load the shader source
    glShaderSource(shader, 1, &shaderSrc, NULL);
@@ -993,7 +985,7 @@ static void SetDefaultGraphicsState ()
 
 static void FillTextureFromCode (int width, int height, int stride, unsigned char* dst)
 {
-	const float t = g_Time * 4.0f;
+	const float t = 0;
 
 	for (int y = 0; y < height; ++y)
 	{
