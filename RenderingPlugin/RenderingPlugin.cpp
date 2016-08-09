@@ -61,15 +61,9 @@ static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16
 #	endif
 #endif
 
-typedef void (*FuncPtr)( const char * );
-FuncPtr _DebugFunc = nullptr;
-#define Debug(m) do { if (_DebugFunc) { _DebugFunc(m); } else { std::cout << m << std::endl; } } while(0);
+static FuncPtr _DebugFunc = nullptr;
 
-#define DebugSS(ssexp) do { \
-    if (_DebugFunc) { \
-        std::stringstream ss; ss << ssexp; std::string s(ss.str()); _DebugFunc(s.c_str()); \
-    } \
-} while(0);
+FuncPtr GetDebugFunc() { return _DebugFunc; }
 
 static bool verbose = false;
 static bool didInit = false;

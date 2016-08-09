@@ -7,6 +7,7 @@
 #include <fstream>
 #include <vector>
 #include "StopWatch.h"
+#include "RenderingPlugin.h"
 
 HRESULT CompileShader(
 	_In_ const char* src,
@@ -29,9 +30,11 @@ HRESULT CompileShader(
 //#endif
 
 	ID3DBlob* shaderBlob = nullptr;
+	StopWatch d3dCompileWatch;
 	HRESULT hr = D3DCompile(src, strlen(src), srcName, defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
 		entryPoint, profile,
 		flags, 0, &shaderBlob, errorBlob);
+	DebugSS("D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
 
 	if (FAILED(hr)) {
 		if (shaderBlob)

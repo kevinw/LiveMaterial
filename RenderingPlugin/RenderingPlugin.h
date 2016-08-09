@@ -45,3 +45,16 @@
 	#define SUPPORT_OPENGL_UNIFIED 1
 	#define SUPPORT_OPENGL_CORE 1
 #endif
+
+#include <sstream>
+
+typedef void(*FuncPtr)(const char *);
+FuncPtr GetDebugFunc();
+
+#define Debug(m) do { if (GetDebugFunc()) { GetDebugFunc()(m); } else { std::cout << m << std::endl; } } while(0);
+
+#define DebugSS(ssexp) do { \
+    if (GetDebugFunc()) { \
+        std::stringstream ss; ss << ssexp; std::string s(ss.str()); GetDebugFunc()(s.c_str()); \
+    } \
+} while(0);
