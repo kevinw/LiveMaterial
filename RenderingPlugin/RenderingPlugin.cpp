@@ -10,9 +10,9 @@
 #include "dxerr.h"
 #endif
 
-//#include <regex>
 #include <sstream>
 #include <cassert>
+#include <iostream>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -21,6 +21,7 @@
 #include <map>
 
 #include "ProducerConsumerQueue.h"
+#include "StopWatch.h"
 
 #define NUM_VERTS 6
 
@@ -62,7 +63,7 @@ static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16
 
 typedef void (*FuncPtr)( const char * );
 FuncPtr _DebugFunc = nullptr;
-#define Debug(m) do { if (_DebugFunc) _DebugFunc(m); } while(0);
+#define Debug(m) do { if (_DebugFunc) { _DebugFunc(m); } else { std::cout << m << std::endl; } } while(0);
 
 #define DebugSS(ssexp) do { \
     if (_DebugFunc) { \
@@ -88,12 +89,6 @@ struct ShaderSource {
 };
 
 folly::ProducerConsumerQueue<ShaderSource> shaderSourceQueue(10);
-
-
-
-extern "C" {
-UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value);
-}
 
 // --------------------------------------------------------------------------
 // Helper utilities
@@ -182,11 +177,6 @@ enum
 // SetUnityStreamingAssetsPath, an example function we export which is called by one of the scripts.
 
 static std::string shaderIncludePath;
-static std::string s_UnityStreamingAssetsPath;
-extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetUnityStreamingAssetsPath(const char* path)
-{
-	s_UnityStreamingAssetsPath = path;
-}
 
 static void INIT_MESSAGE(const char* msg) {
     if (!didInit) {
@@ -333,7 +323,6 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 	MaybeLoadNewShaders();
 
 	MyVertex verts[NUM_VERTS] = {
-#if false
 		{  -1.0f, -1.0f,   0.0f, 0.0f, 0.0f },
 		{   1.0f,  1.0f,   0.0f, 1.0f, 1.0f },
 		{  -1.0,   1.0f,   0.0f, 0.0f, 1.0f },
@@ -341,17 +330,7 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 		{ -1.0f, -1.0f,    0.0f, 0.0f, 0.0f },
 		{ 1.0f,  -1.0f,    0.0f, 1.0f, 0.0f },
 		{ 1.0,    1.0f ,   0.0f, 1.0f, 1.0f },
-#else
-		{ -0.6f, -0.6f,   0.0f, 0.0f, 0.0f },
-		{ 0.6f,   0.6f,   0.0f, 1.0f, 1.0f },
-		{ -0.6f,  0.6f,   0.0f, 0.0f, 1.0f },
-
-		{ -0.6f, -0.6f,    0.0f, 0.0f, 0.0f },
-		{ 0.6f,  -0.6f,    0.0f, 1.0f, 0.0f },
-		{ 0.6f,   0.6f ,   0.0f, 1.0f, 1.0f },
-#endif
 	};
-
 
 	// Some transformation matrices: rotate around Z axis for world
 	// matrix, identity view matrix, and identity projection matrix.
@@ -465,7 +444,6 @@ static void DoEventGraphicsDeviceD3D9(UnityGfxDeviceEventType eventType)
 #if SUPPORT_D3D11
 
 static ID3D11Device* g_D3D11Device = NULL;
-static ID3D11Buffer* g_D3D11VB = NULL; // vertex buffer
 
 static ID3D11Buffer* d3d11ConstantBuffer = NULL; // constant buffer
 static UINT d3d11ConstantBufferSize = 0; // ByteWidth of constant buffer
@@ -479,23 +457,9 @@ static ID3D11DepthStencilState* g_D3D11DepthState = NULL;
 
 static bool EnsureD3D11ResourcesAreCreated()
 {
-	// D3D11 has to load resources. Wait for Unity to provide the streaming assets path first.
-	if (s_UnityStreamingAssetsPath.empty())
-		return false;
-
 	if (g_D3D11BlendState)
 		return true;
-
-	D3D11_BUFFER_DESC desc;
-	memset (&desc, 0, sizeof(desc));
-
-	// vertex buffer
-	desc.Usage = D3D11_USAGE_DEFAULT;
-	desc.ByteWidth = 1024;
-	desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-	g_D3D11Device->CreateBuffer (&desc, NULL, &g_D3D11VB);
-
-
+		
 	// render states
 	D3D11_RASTERIZER_DESC rsdesc;
 	memset (&rsdesc, 0, sizeof(rsdesc));
@@ -523,7 +487,7 @@ static bool EnsureD3D11ResourcesAreCreated()
 
 static void ReleaseD3D11Resources()
 {
-	SAFE_RELEASE(g_D3D11VB);
+	Debug("Releasing D3D11Resources...");
 	SAFE_RELEASE(d3d11ConstantBuffer);
 	SAFE_RELEASE(g_D3D11VertexShader);
 	SAFE_RELEASE(g_D3D11PixelShader);
@@ -531,29 +495,18 @@ static void ReleaseD3D11Resources()
 	SAFE_RELEASE(g_D3D11RasterState);
 	SAFE_RELEASE(g_D3D11BlendState);
 	SAFE_RELEASE(g_D3D11DepthState);
+	Debug("... done releasing D3D11Resources.");
 }
 
 static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 {
-	if (eventType == kUnityGfxDeviceEventInitialize)
-	{
+	if (eventType == kUnityGfxDeviceEventInitialize) {
 		IUnityGraphicsD3D11* d3d11 = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
-		g_D3D11Device = d3d11->GetDevice();
-		
+		g_D3D11Device = d3d11->GetDevice();		
 		EnsureD3D11ResourcesAreCreated();
-	}
-	else if (eventType == kUnityGfxDeviceEventShutdown)
-	{
+	} else if (eventType == kUnityGfxDeviceEventShutdown) {
 		ReleaseD3D11Resources();
 	}
-}
-
-static std::string patchVertexShader(std::string vert) {
-	return vert;
-	//std::string s("there is a subsequence in the string\n");
-	//std::regex e(":\\s*SV_(Vertex|Target)");
-									   // using string/c-string (3) version:
-	//return std::regex_replace(vert, e, "");
 }
 
 static std::string toString(const WCHAR* wbuf) {
@@ -612,16 +565,7 @@ static void reflectInputLayout(ID3DBlob* shader) {
 	std::vector<D3D11_INPUT_ELEMENT_DESC> inputLayoutDesc;
 	UINT ooo = 0;
 
-	/*
-	DebugSS("  x: " << offsetof(MyVertex, x));
-	DebugSS("  y: " << offsetof(MyVertex, y));
-	DebugSS("  z: " << offsetof(MyVertex, z));
-	DebugSS("  u: " << offsetof(MyVertex, u));
-	DebugSS("  v: " << offsetof(MyVertex, v));
-	*/
-
 	static int paramOffsets[] = { 0, 12 };
-
 
 	for (UINT i = 0; i< desc.InputParameters; i++)
 	{
@@ -679,6 +623,7 @@ static void reflectInputLayout(ID3DBlob* shader) {
 }
 
 static void constantBufferReflect(ID3DBlob* shader) {	
+	assert(g_D3D11Device);
 	auto pReflector = shaderReflector(shader);
 	if (!pReflector)
 		return;
@@ -746,11 +691,20 @@ static void constantBufferReflect(ID3DBlob* shader) {
     d == kUnityGfxRendererOpenGLCore || \
     d == kUnityGfxRendererOpenGL)
 
+static bool getLatestShader(ShaderSource& shaderSource) {
+	bool didRead = false;
+	while (shaderSourceQueue.read(shaderSource))
+		didRead = true;
+	return didRead;
+}
+
 static void MaybeLoadNewShaders() {
     ShaderSource shaderSource;
-    if (!shaderSourceQueue.read(shaderSource))
-        return;
+	if (!getLatestShader(shaderSource))
+		return;
 
+	StopWatch loadingShaders;
+	
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
         GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), "/Users/kevin/Desktop/last_shader.frag");
@@ -781,7 +735,7 @@ static void MaybeLoadNewShaders() {
         
 		HRESULT hr = -1;
 
-		{
+		if (shaderSource.fragEntryPoint.size() && shaderSource.fragShader.size()) {
 			ID3DBlob *PS = nullptr;
 			ID3DBlob *error = nullptr;
 
@@ -792,55 +746,59 @@ static void MaybeLoadNewShaders() {
 
 			hr = CompileShader(shaderSource.fragShader.c_str(), filename.c_str(), shaderSource.fragEntryPoint.c_str(), "ps_5_0", defines, &PS, &error);
 			if (FAILED(hr)) {
-				Debug("Could not compile fragment shader");
-				if (error) {
-					std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
-					Debug(errstr.c_str());
-					error->Release();
-				}
+				std::string errstr;
+				if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
+				DebugSS("Could not compile fragment shader:\n " << errstr);
+				if (error) error->Release();
 			} else {
-				g_D3D11PixelShader = nullptr;
 				constantBufferReflect(PS);
+				SAFE_RELEASE(g_D3D11PixelShader);
 				hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
-				if (FAILED(hr)) Debug("Failed to create pixel shader.\n");				
+				if (FAILED(hr)) {
+					Debug("CreatePixelShader failed\n");
+					DebugHR(hr);
+				}
+				else {
+					Debug("loaded fragment shader");
+				}
 			}
 		}
 
-		{
+		if (shaderSource.vertEntryPoint.size() && shaderSource.vertShader.size()) {
 			ID3DBlob *VS = nullptr;
 			ID3DBlob *error = nullptr;
-			shaderSource.vertShader = patchVertexShader(shaderSource.vertShader);
 
 			const D3D_SHADER_MACRO defines[] = {
 				"VERTEX", "1",
 				NULL, NULL
 			};
 			
-			writeTextToFile("c:\\users\\kevnando\\Desktop\\last_vertex_shader.hlsl", shaderSource.vertShader.c_str());
 			hr = CompileShader(shaderSource.vertShader.c_str(), filename.c_str(), shaderSource.vertEntryPoint.c_str(), "vs_5_0", defines, &VS, &error);
 			if (FAILED(hr)) {
-				Debug("Could not compile vertex shader");
-				if (error) {
-					std::string errstr((char*)error->GetBufferPointer(), error->GetBufferSize());
-					Debug(errstr.c_str());
-					error->Release();
-				}
+				std::string errstr;
+				if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
+				DebugSS("Could not compile vertex shader:\n " << errstr);
+				if (error) error->Release();
 			} else {
-				g_D3D11VertexShader = nullptr;
+				SAFE_RELEASE(g_D3D11VertexShader);
+				
 				hr = g_D3D11Device->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), nullptr, &g_D3D11VertexShader);
 				if (FAILED(hr)) {
-					Debug("Failed to create vertex shader");
+					Debug("CreateVertexShader failed");
 					DebugHR(hr);
-				} else {
-					assert(g_D3D11VertexShader);
-					//reflectInputLayout(VS);
-
 				}
-
+				else {
+					Debug("loaded vertex shader");
+				}
 			}
 		}
     }
+
+
 #endif
+
+	DebugSS("loading new shaders took " << loadingShaders.ElapsedMs() << " ms");
+
 }
 
 
@@ -1212,7 +1170,11 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 	#if SUPPORT_D3D11
 	// D3D11 case
-	if (s_DeviceType == kUnityGfxRendererD3D11 && EnsureD3D11ResourcesAreCreated() && g_D3D11VertexShader && g_D3D11PixelShader) {
+	if (s_DeviceType == kUnityGfxRendererD3D11 &&
+		EnsureD3D11ResourcesAreCreated() &&
+		g_D3D11VertexShader &&
+		g_D3D11PixelShader) {
+
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
 
@@ -1470,7 +1432,18 @@ static void clearUniforms() {
     shaderProps.clear();
 }
 
-unsigned char constantBuffer[500 * 1024];
+unsigned char* constantBuffer = nullptr;
+size_t constantBufferSize = 0;
+
+void ensureConstantBufferSize(size_t size) {
+	if (constantBufferSize < size) {
+		if (constantBuffer)
+			delete [] constantBuffer;
+
+		constantBuffer = new unsigned char[size];
+		constantBufferSize = size;
+	}
+}
 
 #if SUPPORT_D3D11
 static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
@@ -1478,8 +1451,7 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 		if (verbose) Debug("updateUniformsD3D11: no constant buffer");
 		return;
 	}
-
-			
+	
 	UINT totalSize = 0;
 	int count = 0;
 	for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i)
@@ -1488,13 +1460,19 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 
 	if (verbose) DebugSS("updateUniformsD3D11 updating " << count << " uniforms");
 	assert(d3d11ConstantBufferSize > 0);
+	ensureConstantBufferSize(d3d11ConstantBufferSize);
 	memset(constantBuffer, 0, d3d11ConstantBufferSize);
 
 	for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
 		auto prop = i->second;
-		assert((int)prop->offset + (int)prop->size <= (int)d3d11ConstantBufferSize);
-		memcpy(constantBuffer + prop->offset, &prop->value[0], prop->size);
-		if (verbose) DebugSS("update d3d uniform " << prop->name << " at offset " << prop->offset << " with size " << prop->size);
+		if (prop->size > 0) {
+			assert((int)prop->offset + (int)prop->size <= (int)d3d11ConstantBufferSize);
+
+			// TODO: use offsets into this buffer to set the values directly, and then strings
+			//       can just be a dictionary of string->offset.
+			memcpy(constantBuffer + prop->offset, &prop->value[0], prop->size);
+			if (verbose) DebugSS("update d3d uniform " << prop->name << " at offset " << prop->offset << " with size " << prop->size);
+		}
 	}
 
 	ctx->UpdateSubresource(d3d11ConstantBuffer, 0, NULL, constantBuffer, totalSize, 0);
@@ -1561,17 +1539,19 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
     return 0;
 }
 
+UNITY_INTERFACE_EXPORT void ClearDebugFunction() { _DebugFunc = nullptr; }
+
 UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
     auto prop = propForName(name, Vector4);
     if (prop)
 		memcpy(prop->value, value, sizeof(float) * 4);
 }
     
-    UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
-        auto prop = propForName(name, Vector4);
-		if (prop)
-	        memcpy(value, prop->value, sizeof(float) * 4);
-    }
+UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
+    auto prop = propForName(name, Vector4);
+	if (prop)
+	    memcpy(value, prop->value, sizeof(float) * 4);
+}
 
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
     auto prop = propForName(name, Float);
@@ -1591,40 +1571,22 @@ UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 		memcpy(prop->value, value, sizeof(float) * 4);
 }
     
-    UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
-		auto prop = propForName(name, Float);
-		if (prop)
-			return prop->value[0];
-		return 0;
-    }
+UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
+	auto prop = propForName(name, Float);
+	return prop ? prop->value[0] : 0;
+}
     
-    UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) {
-        return hasProp(name);
-    }
+UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) { return hasProp(name); }
+UNITY_INTERFACE_EXPORT void Reset() { didInit = false; }
+UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
+UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shaderIncludePath = includePath; }
 
-UNITY_INTERFACE_EXPORT void Reset() {
-  didInit = false;
-}
-
-UNITY_INTERFACE_EXPORT void PrintUniforms() {
-    printUniforms();
-}
-
-UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) {
-	shaderIncludePath = includePath;
-}
-
-UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {    
-    if (!fragShader || !vertexShader) {
-        Debug("shader was null");
-        return;
-    }
-    
+UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
     ShaderSource shaderSource;
-    shaderSource.fragShader = fragShader;
-    shaderSource.fragEntryPoint = fragEntryPoint;
-    shaderSource.vertShader = vertexShader;
-    shaderSource.vertEntryPoint = vertEntryPoint;
+    if (fragShader) shaderSource.fragShader = fragShader;
+    if (fragEntryPoint) shaderSource.fragEntryPoint = fragEntryPoint;
+    if (vertexShader) shaderSource.vertShader = vertexShader;
+    if (vertEntryPoint) shaderSource.vertEntryPoint = vertEntryPoint;
 
     if (!shaderSourceQueue.write(shaderSource))
         Debug("could not write to shader queue");

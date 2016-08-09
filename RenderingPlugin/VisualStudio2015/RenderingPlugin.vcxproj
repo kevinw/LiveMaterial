@@ -283,12 +283,14 @@ ENDLOCAL
     <ClCompile Include="..\dxerr.cpp" />
     <ClCompile Include="..\GL\glew.c" />
     <ClCompile Include="..\RenderingPlugin.cpp" />
+    <ClCompile Include="..\StopWatch.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\GL\glew.h" />
     <ClInclude Include="..\GL\glxew.h" />
     <ClInclude Include="..\GL\wglew.h" />
     <ClInclude Include="..\RenderingPlugin.h" />
+    <ClInclude Include="..\StopWatch.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="..\Shaders\SimplePixelShader.hlsl">
