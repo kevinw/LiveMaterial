@@ -64,8 +64,6 @@ typedef void (*FuncPtr)( const char * );
 FuncPtr _DebugFunc = nullptr;
 #define Debug(m) do { if (_DebugFunc) _DebugFunc(m); } while(0);
 
-static bool verbose = false;
-
 #define DebugSS(ssexp) do { \
     if (_DebugFunc) { \
         std::stringstream ss; ss << ssexp; std::string s(ss.str()); _DebugFunc(s.c_str()); \
@@ -144,9 +142,6 @@ int printOglError(const char *file, int line) {
     Debug(buffer);
     return 1;
 }
-
-// --------------------------------------------------------------------------
-// SetTimeFromUnity, an example function we export which is called by one of the scripts.
 
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath);
 
@@ -300,18 +295,12 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 }
 
 
-// --------------------------------------------------------------------------
-// OnRenderEvent
-// This will be called for GL.IssuePluginEvent script calls; eventID will
-// be the integer passed to IssuePluginEvent. In this example, we just ignore
-// that value.
-
-
+#pragma pack(push, r1, 1)   // n = 16, pushed to stack
 struct MyVertex {
 	float x, y, z;
-	unsigned int color;
     float u, v;
 };
+#pragma pack(pop, r1)   // n = 2 , stack popped
 static void SetDefaultGraphicsState ();
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts);
 
@@ -329,6 +318,12 @@ HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR ent
 
 static void MaybeLoadNewShaders();
 
+// --------------------------------------------------------------------------
+// OnRenderEvent
+// This will be called for GL.IssuePluginEvent script calls; eventID will
+// be the integer passed to IssuePluginEvent. In this example, we just ignore
+// that value.
+
 static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 {
 	// Unknown graphics device type? Do nothing.
@@ -337,18 +332,24 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 
 	MaybeLoadNewShaders();
 
-	// A colored triangle. Note that colors will come out differently
-	// in D3D9/11 and OpenGL, for example, since they expect color bytes
-	// in different ordering.
 	MyVertex verts[NUM_VERTS] = {
-		{  -1.0f, -1.0f,  0, 0xffffffff, 0, 0 },
-		{   1.0f,  1.0f,  0, 0xffffffff, 1, 1 },
-		{  -1.0,   1.0f ,  0, 0xffffffff, 0, 1 },
+#if false
+		{  -1.0f, -1.0f,   0.0f, 0.0f, 0.0f },
+		{   1.0f,  1.0f,   0.0f, 1.0f, 1.0f },
+		{  -1.0,   1.0f,   0.0f, 0.0f, 1.0f },
 
-		{ -1.0f, -1.0f,  0, 0xffffffff, 0, 0 },
-		{ 1.0f,  -1.0f,  0, 0xffffffff, 1, 0 },
-		{ 1.0,    1.0f ,  0, 0xffffffff, 1, 1 },
+		{ -1.0f, -1.0f,    0.0f, 0.0f, 0.0f },
+		{ 1.0f,  -1.0f,    0.0f, 1.0f, 0.0f },
+		{ 1.0,    1.0f ,   0.0f, 1.0f, 1.0f },
+#else
+		{ -0.6f, -0.6f,   0.0f, 0.0f, 0.0f },
+		{ 0.6f,   0.6f,   0.0f, 1.0f, 1.0f },
+		{ -0.6f,  0.6f,   0.0f, 0.0f, 1.0f },
 
+		{ -0.6f, -0.6f,    0.0f, 0.0f, 0.0f },
+		{ 0.6f,  -0.6f,    0.0f, 1.0f, 0.0f },
+		{ 0.6f,   0.6f ,   0.0f, 1.0f, 1.0f },
+#endif
 	};
 
 
@@ -358,7 +359,7 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 		1,0,0,0,
 		0,1,0,0,
 		0,0,1,0,
-		0,0,0.7f,1,
+		0,0,0,1,
 	};
 	float identityMatrix[16] = {
 		1,0,0,0,
@@ -476,11 +477,6 @@ static ID3D11RasterizerState* g_D3D11RasterState = NULL;
 static ID3D11BlendState* g_D3D11BlendState = NULL;
 static ID3D11DepthStencilState* g_D3D11DepthState = NULL;
 
-static D3D11_INPUT_ELEMENT_DESC s_DX11InputElementDesc[] = {
-	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-	{ "COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-};
-
 static bool EnsureD3D11ResourcesAreCreated()
 {
 	// D3D11 has to load resources. Wait for Unity to provide the streaming assets path first.
@@ -587,66 +583,159 @@ static int roundUp(int numToRound, int multiple) {
 	return ((numToRound + isPositive * (multiple - 1)) / multiple) * multiple;
 }
 
-void constantBufferReflect(ID3DBlob* shader)
-{
-	HRESULT hr;
-	ID3D11ShaderReflection* pReflector = NULL;
+static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
+	ID3D11ShaderReflection* reflector = nullptr;
 
-	hr = D3DReflect(shader->GetBufferPointer(),
+	HRESULT hr = D3DReflect(
+		shader->GetBufferPointer(),
 		shader->GetBufferSize(),
-		IID_ID3D11ShaderReflection, // See top of file: #define INITGUID //need to add this to get the shader reflection library working
-		(void**)&pReflector);
+		IID_ID3D11ShaderReflection,
+		(void**)&reflector);
+
+	if (FAILED(hr)) {
+		DebugHR(hr);
+		return nullptr;
+	}
+	
+	return reflector;
+}
+
+static void reflectInputLayout(ID3DBlob* shader) {
+	auto reflector = shaderReflector(shader);
+	if (!reflector)
+		return;
+
+	D3D11_SHADER_DESC desc;
+	reflector->GetDesc(&desc);
+
+		// Read input layout description from shader info
+	std::vector<D3D11_INPUT_ELEMENT_DESC> inputLayoutDesc;
+	UINT ooo = 0;
+
+	/*
+	DebugSS("  x: " << offsetof(MyVertex, x));
+	DebugSS("  y: " << offsetof(MyVertex, y));
+	DebugSS("  z: " << offsetof(MyVertex, z));
+	DebugSS("  u: " << offsetof(MyVertex, u));
+	DebugSS("  v: " << offsetof(MyVertex, v));
+	*/
+
+	static int paramOffsets[] = { 0, 12 };
+
+
+	for (UINT i = 0; i< desc.InputParameters; i++)
+	{
+		D3D11_SIGNATURE_PARAMETER_DESC paramDesc;
+		reflector->GetInputParameterDesc(i, &paramDesc);
+
+		D3D11_INPUT_ELEMENT_DESC elementDesc; // fill out input element desc
+		elementDesc.SemanticName = paramDesc.SemanticName;
+		elementDesc.SemanticIndex = paramDesc.SemanticIndex;
+		elementDesc.InputSlot = 0;
+		elementDesc.AlignedByteOffset = paramOffsets[i];
+		elementDesc.InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+		elementDesc.InstanceDataStepRate = 0;
+
+		int size = -1;
+		
+		// determine DXGI format
+		if (paramDesc.Mask == 1) {
+			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32_UINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32_SINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32_FLOAT;
+			size = 4;
+		} else if (paramDesc.Mask <= 3) {
+			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32G32_UINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32G32_SINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32G32_FLOAT;
+			size = 2 * 4;
+		} else if (paramDesc.Mask <= 7) {
+			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32_UINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32_SINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32G32B32_FLOAT;
+			size = 3 * 4;
+		} else if (paramDesc.Mask <= 15) {
+			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32A32_UINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32A32_SINT;
+			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+			size = 4 * 4;
+		}
+				
+		DebugSS("SemanticName: " << paramDesc.SemanticName << ", SemanticIndex: " << paramDesc.SemanticIndex << " offset: " << paramOffsets[i] << ", size: " << size);
+		
+		//save element desc
+		inputLayoutDesc.push_back(elementDesc);
+	}
+
+	// Try to create Input Layout
+	SAFE_RELEASE(g_D3D11InputLayout);
+	HRESULT hr = g_D3D11Device->CreateInputLayout(&inputLayoutDesc[0], (UINT)inputLayoutDesc.size(), shader->GetBufferPointer(), shader->GetBufferSize(), &g_D3D11InputLayout);	
+	if (FAILED(hr)) {
+		Debug("Could not create automatic input layout");
+		DebugHR(hr);
+	}
+
+	reflector->Release();
+}
+
+static void constantBufferReflect(ID3DBlob* shader) {	
+	auto pReflector = shaderReflector(shader);
+	if (!pReflector)
+		return;
 
 	D3D11_SHADER_DESC desc;
 	pReflector->GetDesc(&desc);
-
+	
 	std::stringstream fout;
-	fout << "Reflecting Constant Buffers (" << desc.ConstantBuffers << ")\n";
+	if (verbose) fout << "Reflecting Constant Buffers (" << desc.ConstantBuffers << ")\n";
 
-	assert(desc.ConstantBuffers == 1);
-	for (UINT i = 0; i < desc.ConstantBuffers; i++)
-	{
+	assert(desc.ConstantBuffers < 2); // TODO: if we add enough uniforms, do we need to split them into multiple buffers?
+	SAFE_RELEASE(d3d11ConstantBuffer);
+
+	for (UINT i = 0; i < desc.ConstantBuffers; i++) {
 		D3D11_SHADER_BUFFER_DESC Description;
 		ID3D11ShaderReflectionConstantBuffer* pConstBuffer = pReflector->GetConstantBufferByIndex(i);
 		pConstBuffer->GetDesc(&Description);
 
 		d3d11ConstantBufferSize = 0;
-
 		for (UINT j = 0; j < Description.Variables; j++) {
 			ID3D11ShaderReflectionVariable* pVariable = pConstBuffer->GetVariableByIndex(j);
 			D3D11_SHADER_VARIABLE_DESC var_desc;
 			pVariable->GetDesc(&var_desc);
-			fout << " Name: " << var_desc.Name;
-			fout << " Size: " << var_desc.Size;
-			fout << " Offset: " << var_desc.StartOffset << "\n";
+			if (verbose) {
+				fout << " Name: " << var_desc.Name;
+				fout << " Size: " << var_desc.Size;
+				fout << " Offset: " << var_desc.StartOffset << "\n";
+			}
 
 			// mark the prop's name, size and offset
 			propForNameSizeOffset(var_desc.Name, var_desc.Size, var_desc.StartOffset);
-
 			d3d11ConstantBufferSize = max(d3d11ConstantBufferSize, var_desc.StartOffset + var_desc.Size);
 		}
 		
 		d3d11ConstantBufferSize = roundUp(d3d11ConstantBufferSize, 16);
-		DebugSS("Allocating a constant buffer with size " << d3d11ConstantBufferSize);
+		if (verbose) DebugSS("Allocating a constant buffer with size " << d3d11ConstantBufferSize);
 
 		// constant buffer
 		D3D11_BUFFER_DESC bufdesc;
 		memset(&bufdesc, 0, sizeof(bufdesc));
-		bufdesc.Usage = D3D11_USAGE_DYNAMIC;
+		bufdesc.Usage = D3D11_USAGE_DEFAULT;
 		bufdesc.ByteWidth = d3d11ConstantBufferSize;
 		bufdesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-		bufdesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		bufdesc.CPUAccessFlags = 0;//D3D11_CPU_ACCESS_WRITE;
 
-		SAFE_RELEASE(d3d11ConstantBuffer);
-
+		//DebugSS("Creating a constant buffer with byte width " << d3d11ConstantBufferSize);
+		
 		HRESULT hr = g_D3D11Device->CreateBuffer(&bufdesc, NULL, &d3d11ConstantBuffer);
 		if (FAILED(hr)) {
+			Debug("ERROR: could not create constant buffer:");
 			DebugHR(hr);
-			Debug("ERROR: could not create constant buffer");
 		}
 	}
 	
-	Debug(fout.str().c_str());
+	if (verbose) Debug(fout.str().c_str());
+
+	pReflector->Release();
 }
 
 
@@ -741,8 +830,13 @@ static void MaybeLoadNewShaders() {
 				hr = g_D3D11Device->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), nullptr, &g_D3D11VertexShader);
 				if (FAILED(hr)) {
 					Debug("Failed to create vertex shader");
-				} else if (g_D3D11VertexShader)
-					g_D3D11Device->CreateInputLayout(s_DX11InputElementDesc, 2, VS->GetBufferPointer(), VS->GetBufferSize(), &g_D3D11InputLayout);
+					DebugHR(hr);
+				} else {
+					assert(g_D3D11VertexShader);
+					//reflectInputLayout(VS);
+
+				}
+
 			}
 		}
     }
@@ -1078,39 +1172,6 @@ static void SetDefaultGraphicsState ()
 }
 
 
-static void FillTextureFromCode (int width, int height, int stride, unsigned char* dst)
-{
-	const float t = 0;
-
-	for (int y = 0; y < height; ++y)
-	{
-		unsigned char* ptr = dst;
-		for (int x = 0; x < width; ++x)
-		{
-			// Simple oldskool "plasma effect", a bunch of combined sine waves
-			int vv = int(
-				(127.0f + (127.0f * sinf(x/7.0f+t))) +
-				(127.0f + (127.0f * sinf(y/5.0f-t))) +
-				(127.0f + (127.0f * sinf((x+y)/6.0f-t))) +
-				(127.0f + (127.0f * sinf(sqrtf(float(x*x + y*y))/4.0f-t)))
-				) / 4;
-
-			// Write the texture pixel
-			ptr[0] = vv;
-			ptr[1] = vv;
-			ptr[2] = vv;
-			ptr[3] = vv;
-
-			// To next pixel (our pixels are 4 bpp)
-			ptr += 4;
-		}
-
-		// To next image row
-		dst += stride;
-	}
-}
-
-
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
 {
 	// Does actual rendering of a simple triangle
@@ -1145,17 +1206,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		// Draw!
 		g_D3D9Device->DrawPrimitive (D3DPT_TRIANGLELIST, 0, 1);
 
-		// Update native texture from code
-		if (g_TexturePointer)
-		{
-			IDirect3DTexture9* d3dtex = (IDirect3DTexture9*)g_TexturePointer;
-			D3DSURFACE_DESC desc;
-			d3dtex->GetLevelDesc (0, &desc);
-			D3DLOCKED_RECT lr;
-			d3dtex->LockRect (0, &lr, NULL, 0);
-			FillTextureFromCode (desc.Width, desc.Height, lr.Pitch, (unsigned char*)lr.pBits);
-			d3dtex->UnlockRect (0);
-		}
 	}
 	#endif
 
@@ -1171,36 +1221,13 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		// set shaders
 		
 		ctx->VSSetShader (g_D3D11VertexShader, NULL, 0);		
-		if (d3d11ConstantBuffer)
-			ctx->PSSetConstantBuffers(0, 1, &d3d11ConstantBuffer);
 		ctx->PSSetShader (g_D3D11PixelShader, NULL, 0);
+		ctx->PSSetConstantBuffers(0, 1, &d3d11ConstantBuffer);
 
-		// update vertex buffer
-		ctx->UpdateSubresource (g_D3D11VB, 0, NULL, verts, sizeof(verts[0])*NUM_VERTS, 0);
-
-		// set input assembler data and draw
-		ctx->IASetInputLayout (g_D3D11InputLayout);
-		ctx->IASetPrimitiveTopology (D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		UINT stride = sizeof(MyVertex);
-		UINT offset = 0;
-		ctx->IASetVertexBuffers (0, 1, &g_D3D11VB, &stride, &offset);
-		ctx->Draw (NUM_VERTS, 0);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+		ctx->Draw(4, 0);
         
-        INIT_MESSAGE("LiveMaterial is drawing with D3D11");
-
-		// update native texture from code
-		if (g_TexturePointer)
-		{
-			ID3D11Texture2D* d3dtex = (ID3D11Texture2D*)g_TexturePointer;
-			D3D11_TEXTURE2D_DESC desc;
-			d3dtex->GetDesc (&desc);
-
-			unsigned char* data = new unsigned char[desc.Width*desc.Height*4];
-			FillTextureFromCode (desc.Width, desc.Height, desc.Width*4, data);
-			ctx->UpdateSubresource (d3dtex, 0, NULL, data, desc.Width*4, 0);
-			delete[] data;
-		}
-
+        if (verbose) INIT_MESSAGE("LiveMaterial is drawing with D3D11");
 		ctx->Release();
 	}
 	#endif
@@ -1219,64 +1246,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 			WaitForSingleObject(s_D3D12Event, INFINITE);
 		}
 		
-		// Update native texture from code
-		if (g_TexturePointer)
-		{
-			ID3D12Resource* resource = (ID3D12Resource*)g_TexturePointer;
-			D3D12_RESOURCE_DESC desc = resource->GetDesc();
-
-			// Begin a command list
-			s_D3D12CmdAlloc->Reset();
-			s_D3D12CmdList->Reset(s_D3D12CmdAlloc, nullptr);
-
-			// Fill data
-			const UINT64 kDataSize = desc.Width*desc.Height*4;
-			ID3D12Resource* upload = GetD3D12UploadResource(kDataSize);
-			void* mapped = NULL;
-			upload->Map(0, NULL, &mapped);
-			if (desc.Width > MAXINT32)
-				throw "error";
-			if (desc.Height > MAXINT32)
-				throw "error";
-			int w = static_cast<int>(desc.Width);
-			int h = static_cast<int>(desc.Height);
-			FillTextureFromCode(w, h, w*4, (unsigned char*)mapped);
-			upload->Unmap(0, NULL);
-
-			D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-			srcLoc.pResource = upload;
-			srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-			device->GetCopyableFootprints(&desc, 0, 1, 0, &srcLoc.PlacedFootprint, nullptr, nullptr, nullptr);
-
-			D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-			dstLoc.pResource = resource;
-			dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			dstLoc.SubresourceIndex = 0;
-
-			// Queue data upload
-			const D3D12_RESOURCE_STATES kDesiredState = D3D12_RESOURCE_STATE_COPY_DEST;
-			D3D12_RESOURCE_STATES resourceState = kDesiredState;
-			s_D3D12->GetResourceState(resource, &resourceState); // Get resource state as it will be after all command lists Unity queued before this plugin call execute.
-			if (resourceState != kDesiredState)
-			{
-				D3D12_RESOURCE_BARRIER barrierDesc = {};
-				barrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-				barrierDesc.Transition.pResource = resource;
-				barrierDesc.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-				barrierDesc.Transition.StateBefore = resourceState;
-				barrierDesc.Transition.StateAfter = kDesiredState;
-				s_D3D12CmdList->ResourceBarrier(1, &barrierDesc);
-				s_D3D12->SetResourceState(resource, kDesiredState); // Set resource state as it will be after this command list is executed.
-			}
-
-			s_D3D12CmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
-
-			// Execute the command list
-			s_D3D12CmdList->Close();
-			ID3D12CommandList* lists[1] = { s_D3D12CmdList };
-			queue->ExecuteCommandLists(1, lists);
-		}
-
 		// Insert fence
 		++s_D3D12FenceValue;
 		queue->Signal(s_D3D12Fence, s_D3D12FenceValue);
@@ -1332,26 +1301,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
     
         INIT_MESSAGE("LiveMaterial is drawing with OpenGL ES/Core");
         
-		// update native texture from code
-		if (g_TexturePointer)
-		{
-			GLuint gltex = (GLuint)(size_t)(g_TexturePointer);
-			glBindTexture(GL_TEXTURE_2D, gltex);
-			// The script only pass width and height with OpenGL ES on mobile
-#if SUPPORT_OPENGL_CORE
-			if (s_DeviceType == kUnityGfxRendererOpenGLCore)
-			{
-				glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &g_TexWidth);
-				glGetTexLevelParameteriv (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &g_TexHeight);
-			}
-#endif
-            
-			auto data = new unsigned char[g_TexWidth*g_TexHeight*4];
-			FillTextureFromCode(g_TexWidth, g_TexHeight, g_TexHeight*4, data);
-			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_TexWidth, g_TexHeight, GL_RGBA, GL_UNSIGNED_BYTE, data);
-			delete[] data;
-		}
-
 #if SUPPORT_OPENGL_CORE
 		if (s_DeviceType == kUnityGfxRendererOpenGLCore)
 		{
@@ -1394,6 +1343,8 @@ struct ShaderProp {
 		offset = 0;
 		size = 0;
 #endif
+		for (size_t i = 0; i < 16; ++i)
+			value[i] = 0.0f;
     }
     
     PropType type;
@@ -1453,7 +1404,7 @@ static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16
 		SAFE_DELETE(prop);
 		prop = shaderProps[name] = new ShaderProp(ShaderProp::typeForSize(size), name);
 		prop->size = size;
-		prop->offset = offset;		
+		prop->offset = offset;
 	} else {
 		assert(prop->size == size);
 		assert(prop->offset == offset);
@@ -1482,6 +1433,10 @@ static void printUniforms() {
         if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
             ss << "(INVALID) ";
 #endif
+#if SUPPORT_D3D11
+		ss << "(offset: " << prop->offset << ", size: " << prop->size << ") ";
+#endif
+
         switch (prop->type) {
             case Float:
                 ss << prop->value[0]; break;
@@ -1538,7 +1493,7 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 	for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
 		auto prop = i->second;
 		assert((int)prop->offset + (int)prop->size <= (int)d3d11ConstantBufferSize);
-		memcpy(constantBuffer + prop->offset, &prop->value, prop->size);
+		memcpy(constantBuffer + prop->offset, &prop->value[0], prop->size);
 		if (verbose) DebugSS("update d3d uniform " << prop->name << " at offset " << prop->offset << " with size " << prop->size);
 	}
 
