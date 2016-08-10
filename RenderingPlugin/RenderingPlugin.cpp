@@ -321,7 +321,6 @@ struct CompileTask {
 	string src;
 	string srcName;
 	string entryPoint;
-	string profile;
 
 	void operator()() {
 		const D3D_SHADER_MACRO defines[] = {
@@ -329,10 +328,12 @@ struct CompileTask {
 			NULL, NULL
 		};
 
+		const char* profile = shaderType == Fragment ? "ps_5_0" : "vs_5_0";
+
 		ID3DBlob *shaderBlob = nullptr;
 		ID3DBlob *error = nullptr;
 		//StopWatch d3dCompileWatch;
-		HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile.c_str(), defines, &shaderBlob, &error);
+		HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error);
 
 		if (FAILED(hr)) {
 			std::string errstr;
@@ -789,14 +790,14 @@ static void MaybeCompileNewShaders() {
 	
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
-        GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), "/Users/kevin/Desktop/last_shader.frag");
+        GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str());
         if (newFrag) {
             if (g_FShader)
                 glDeleteShader(g_FShader);
             g_FShader = newFrag;
         }
         
-        GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), "/Users/kevin/Desktop/last_shader.vert");
+        GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str());
         if (newVert) {
             if (g_VProg)
                 glDeleteShader(g_VProg);
@@ -817,7 +818,6 @@ static void MaybeCompileNewShaders() {
 			CompileTask compileTask;
 			compileTask.shaderType = Fragment;
 			compileTask.entryPoint = shaderSource.fragEntryPoint;
-			compileTask.profile = "ps_5_0";
 			compileTask.src = shaderSource.fragShader;
 			compileTask.srcName = shaderIncludePath + "\\DUMMYfrag.hlsl";
 			std::thread compileThread(compileTask);
@@ -828,7 +828,6 @@ static void MaybeCompileNewShaders() {
 			CompileTask compileTask;
 			compileTask.shaderType = Vertex;
 			compileTask.entryPoint = shaderSource.vertEntryPoint;
-			compileTask.profile = "vs_5_0";
 			compileTask.src = shaderSource.vertShader;
 			compileTask.srcName = shaderIncludePath + "\\DUMMYvert.hlsl";
 			std::thread compileThread(compileTask);
@@ -1624,13 +1623,25 @@ UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
 UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shaderIncludePath = includePath; }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
-    ShaderSource shaderSource;
-    if (fragShader) shaderSource.fragShader = fragShader;
-    if (fragEntryPoint) shaderSource.fragEntryPoint = fragEntryPoint;
-    if (vertexShader) shaderSource.vertShader = vertexShader;
-    if (vertEntryPoint) shaderSource.vertEntryPoint = vertEntryPoint;
+	if (fragShader && fragEntryPoint) {
+		CompileTask task;
+		task.entryPoint = fragEntryPoint;
+		task.shaderType = Fragment;
+		task.src = fragShader;
+		task.srcName = shaderIncludePath + "\\fragment.hlsl";
 
-    if (!shaderSourceQueue.write(shaderSource))
-        Debug("could not write to shader queue");
+		std::thread compileThread(task);
+		compileThread.detach();
+	}
+	if (vertexShader && vertEntryPoint) {
+		CompileTask task;
+		task.entryPoint = vertEntryPoint;
+		task.shaderType = Vertex;
+		task.src = vertexShader;
+		task.srcName = shaderIncludePath + "\\vertex.hlsl";
+
+		std::thread compileThread(task);
+		compileThread.detach();
+	}
 }
 }
