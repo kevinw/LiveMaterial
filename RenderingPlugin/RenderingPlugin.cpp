@@ -799,18 +799,22 @@ static void MaybeCompileNewShaders() {
 	
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
-        GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), nullptr);
-        if (newFrag) {
-            if (g_FShader)
-                glDeleteShader(g_FShader);
-            g_FShader = newFrag;
+        if (shaderSource.fragShader.size() > 0) {
+          GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), nullptr);
+          if (newFrag) {
+              if (g_FShader)
+                  glDeleteShader(g_FShader);
+              g_FShader = newFrag;
+          }
         }
         
-        GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), nullptr);
-        if (newVert) {
-            if (g_VProg)
-                glDeleteShader(g_VProg);
-            g_VProg = newVert;
+        if (shaderSource.vertShader.size() > 0) {
+          GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), nullptr);
+          if (newVert) {
+              if (g_VProg)
+                  glDeleteShader(g_VProg);
+              g_VProg = newVert;
+          }
         }
 
         LinkProgram();
@@ -1058,9 +1062,9 @@ static void LinkProgram() {
     
     GLuint program = glCreateProgram();
     assert(program > 0);
-    glBindAttribLocation(program, ATTRIB_POSITION, "xlat_attrib_POSITION");
-    glBindAttribLocation(program, ATTRIB_COLOR, "xlat_attrib_COLOR");
-    glBindAttribLocation(program, ATTRIB_UV, "xlat_attrib_TEXCOORD0");
+    //glBindAttribLocation(program, ATTRIB_POSITION, "xlat_attrib_POSITION");
+    //glBindAttribLocation(program, ATTRIB_COLOR, "xlat_attrib_COLOR");
+    //glBindAttribLocation(program, ATTRIB_UV, "xlat_attrib_TEXCOORD0");
     glAttachShader(program, g_VProg);
     glAttachShader(program, g_FShader);
 #if SUPPORT_OPENGL_CORE
@@ -1172,7 +1176,7 @@ static void SetDefaultGraphicsState ()
 		glDisable(GL_BLEND);
 		glDepthFunc(GL_LEQUAL);
 		glEnable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
+		glDepthMask(GL_TRUE);
 
 		assert(glGetError() == GL_NO_ERROR);
 	}
@@ -1285,12 +1289,13 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 #if SUPPORT_OPENGL_CORE
 		if (s_DeviceType == kUnityGfxRendererOpenGLCore)
 		{
-			glGenVertexArrays(1, &g_VertexArray);
-			glBindVertexArray(g_VertexArray);
+			//glGenVertexArrays(1, &g_VertexArray);
+			//glBindVertexArray(g_VertexArray);
 		}
         printOpenGLError();
 #endif
 
+        /*
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         printOpenGLError();
         
@@ -1308,8 +1313,9 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
         
         glEnableVertexAttribArray(ATTRIB_UV);
         glVertexAttribPointer(ATTRIB_UV, 2, GL_FLOAT, GL_TRUE, sizeof(MyVertex), (void*)offsetof(MyVertex, u));
+        */
 
-		glDrawArrays(GL_TRIANGLES, 0, NUM_VERTS);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         printOpenGLError();
     
         INIT_MESSAGE("LiveMaterial is drawing with OpenGL ES/Core");
@@ -1317,7 +1323,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 #if SUPPORT_OPENGL_CORE
 		if (s_DeviceType == kUnityGfxRendererOpenGLCore)
 		{
-			glDeleteVertexArrays(1, &g_VertexArray);
+			//glDeleteVertexArrays(1, &g_VertexArray);
 		}
 #endif
 
@@ -1541,6 +1547,8 @@ static void updateUniformsGL() {
 
     if (g_Program == 0)
         return;
+
+    std::stringstream errors;
     
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
@@ -1551,7 +1559,7 @@ static void updateUniformsGL() {
         if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
             prop->uniformIndex = glGetUniformLocation(g_Program, prop->name.c_str());
             if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID) {
-                DebugSS("invalid uniform: " << prop->name);
+                errors << "invalid uniform: " << prop->name << std::endl;
                 continue;
             }
             assert(prop->uniformIndex != ShaderProp::UNIFORM_UNSET);
@@ -1578,6 +1586,9 @@ static void updateUniformsGL() {
 		default:
 			assert(false);
 		}
+
+    string errorStr(errors.str());
+    if (errorStr.size()) Debug(errorStr.c_str());
             
         if (printOpenGLError())
             DebugSS("error setting uniform " << prop->name << " with type " << prop->typeString() << " and uniform index " << prop->uniformIndex);
