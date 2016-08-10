@@ -755,6 +755,7 @@ static bool getLatestShader(ShaderSource& shaderSource) {
 }
 
 static void MaybeLoadNewShaders() {
+#ifdef SUPPORT_D3D
 	CompileTaskOutput compileTaskOutput;
 	while (shaderCompilerOutputs.read(compileTaskOutput)) {
 		ID3DBlob* shaderBlob = compileTaskOutput.shaderBlob;
@@ -786,6 +787,7 @@ static void MaybeLoadNewShaders() {
 			assert(false);
 		}
 	}
+#endif
 }
 
 static void MaybeCompileNewShaders() {
@@ -1644,25 +1646,39 @@ UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shad
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
-	if (fragShader && fragEntryPoint) {
-		CompileTask task;
-		task.entryPoint = fragEntryPoint;
-		task.shaderType = Fragment;
-		task.src = fragShader;
-		task.srcName = shaderIncludePath + "\\fragment.hlsl";
+#if SUPPORT_D3D
+	if (currentDeviceType == kUnityGfxRendererD3D11) {
+    if (fragShader && fragEntryPoint) {
+      CompileTask task;
+      task.entryPoint = fragEntryPoint;
+      task.shaderType = Fragment;
+      task.src = fragShader;
+      task.srcName = shaderIncludePath + "\\fragment.hlsl";
 
-		std::thread compileThread(task);
-		compileThread.detach();
-	}
-	if (vertexShader && vertEntryPoint) {
-		CompileTask task;
-		task.entryPoint = vertEntryPoint;
-		task.shaderType = Vertex;
-		task.src = vertexShader;
-		task.srcName = shaderIncludePath + "\\vertex.hlsl";
+      std::thread compileThread(task);
+      compileThread.detach();
+    }
+    if (vertexShader && vertEntryPoint) {
+      CompileTask task;
+      task.entryPoint = vertEntryPoint;
+      task.shaderType = Vertex;
+      task.src = vertexShader;
+      task.srcName = shaderIncludePath + "\\vertex.hlsl";
 
-		std::thread compileThread(task);
-		compileThread.detach();
-	}
+      std::thread compileThread(task);
+      compileThread.detach();
+    }
+
+    return;
+  }
+#endif 
+  ShaderSource shaderSource;
+  if (fragShader) shaderSource.fragShader = fragShader;
+  if (fragEntryPoint) shaderSource.fragEntryPoint = fragEntryPoint;
+  if (vertexShader) shaderSource.vertShader = vertexShader;
+  if (vertEntryPoint) shaderSource.vertEntryPoint = vertEntryPoint;
+
+  if (!shaderSourceQueue.write(shaderSource))
+      Debug("could not write to shader queue");
 }
 }
