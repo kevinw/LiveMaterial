@@ -150,30 +150,6 @@ int printOglError(const char *file, int line) {
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath);
 
 
-// --------------------------------------------------------------------------
-// SetTextureFromUnity, an example function we export which is called by one of the scripts.
-
-static void* g_TexturePointer = NULL;
-#ifdef SUPPORT_OPENGL_UNIFIED
-static int   g_TexWidth  = 0;
-static int   g_TexHeight = 0;
-#endif
-
-#if SUPPORT_OPENGL_UNIFIED
-extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTextureFromUnity(void* texturePtr, int w, int h)
-#else
-extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTextureFromUnity(void* texturePtr)
-#endif
-{
-	// A script calls this at initialization time; just remember the texture pointer here.
-	// Will update texture pixels each frame from the plugin rendering event (texture update
-	// needs to happen on the rendering thread).
-	g_TexturePointer = texturePtr;
-#if SUPPORT_OPENGL_UNIFIED
-	g_TexWidth = w;
-	g_TexHeight = h;
-#endif
-}
 
 enum
 {
@@ -253,7 +229,6 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 		{
 			DebugLog("OnGraphicsDeviceEvent(Shutdown).\n");
 			s_DeviceType = kUnityGfxRendererNull;
-			g_TexturePointer = NULL;
 			break;
 		}
 
@@ -540,9 +515,14 @@ static bool EnsureD3D11ResourcesAreCreated()
 	return true;
 }
 
+static void ReleaseD3D11Resources() {
+	ID3D11DeviceContext* ctx = NULL;
+	g_D3D11Device->GetImmediateContext(&ctx);
+	ctx->VSSetShader(NULL, NULL, 0);
+	ctx->PSSetShader(NULL, NULL, 0);
+	ctx->PSSetConstantBuffers(0, 0, NULL);
+	ctx->Release();
 
-static void ReleaseD3D11Resources()
-{
 	Debug("Releasing D3D11Resources...");
 	SAFE_RELEASE(d3d11ConstantBuffer);
 	SAFE_RELEASE(g_D3D11VertexShader);
@@ -607,75 +587,6 @@ static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
 	}
 	
 	return reflector;
-}
-
-static void reflectInputLayout(ID3DBlob* shader) {
-	auto reflector = shaderReflector(shader);
-	if (!reflector)
-		return;
-
-	D3D11_SHADER_DESC desc;
-	reflector->GetDesc(&desc);
-
-		// Read input layout description from shader info
-	std::vector<D3D11_INPUT_ELEMENT_DESC> inputLayoutDesc;
-	UINT ooo = 0;
-
-	static int paramOffsets[] = { 0, 12 };
-
-	for (UINT i = 0; i< desc.InputParameters; i++)
-	{
-		D3D11_SIGNATURE_PARAMETER_DESC paramDesc;
-		reflector->GetInputParameterDesc(i, &paramDesc);
-
-		D3D11_INPUT_ELEMENT_DESC elementDesc; // fill out input element desc
-		elementDesc.SemanticName = paramDesc.SemanticName;
-		elementDesc.SemanticIndex = paramDesc.SemanticIndex;
-		elementDesc.InputSlot = 0;
-		elementDesc.AlignedByteOffset = paramOffsets[i];
-		elementDesc.InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
-		elementDesc.InstanceDataStepRate = 0;
-
-		int size = -1;
-		
-		// determine DXGI format
-		if (paramDesc.Mask == 1) {
-			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32_UINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32_SINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32_FLOAT;
-			size = 4;
-		} else if (paramDesc.Mask <= 3) {
-			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32G32_UINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32G32_SINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32G32_FLOAT;
-			size = 2 * 4;
-		} else if (paramDesc.Mask <= 7) {
-			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32_UINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32_SINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32G32B32_FLOAT;
-			size = 3 * 4;
-		} else if (paramDesc.Mask <= 15) {
-			if      (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_UINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32A32_UINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_SINT32)  elementDesc.Format = DXGI_FORMAT_R32G32B32A32_SINT;
-			else if (paramDesc.ComponentType == D3D_REGISTER_COMPONENT_FLOAT32) elementDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-			size = 4 * 4;
-		}
-				
-		DebugSS("SemanticName: " << paramDesc.SemanticName << ", SemanticIndex: " << paramDesc.SemanticIndex << " offset: " << paramOffsets[i] << ", size: " << size);
-		
-		//save element desc
-		inputLayoutDesc.push_back(elementDesc);
-	}
-
-	// Try to create Input Layout
-	SAFE_RELEASE(g_D3D11InputLayout);
-	HRESULT hr = g_D3D11Device->CreateInputLayout(&inputLayoutDesc[0], (UINT)inputLayoutDesc.size(), shader->GetBufferPointer(), shader->GetBufferSize(), &g_D3D11InputLayout);	
-	if (FAILED(hr)) {
-		Debug("Could not create automatic input layout");
-		DebugHR(hr);
-	}
-
-	reflector->Release();
 }
 
 static void constantBufferReflect(ID3DBlob* shader) {	
@@ -771,7 +682,7 @@ static void MaybeLoadNewShaders() {
 				Debug("loaded fragment shader");
 			}
 		}
-		else if (compileTaskOutput.shaderType == Vertex) {
+		else if (compileTaskOutput.shaderType == Vertex) {			
 			SAFE_RELEASE(g_D3D11VertexShader);
 			HRESULT hr = g_D3D11Device->CreateVertexShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &g_D3D11VertexShader);
 			if (FAILED(hr)) {
@@ -780,11 +691,13 @@ static void MaybeLoadNewShaders() {
 			}
 			else {
 				Debug("loaded vertex shader");
-			}
+			}			
 		}
 		else {
 			assert(false);
 		}
+
+		SAFE_RELEASE(compileTaskOutput.shaderBlob);
 	}
 }
 
@@ -1211,7 +1124,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 		// Draw!
 		g_D3D9Device->DrawPrimitive (D3DPT_TRIANGLELIST, 0, 1);
-
 	}
 	#endif
 
