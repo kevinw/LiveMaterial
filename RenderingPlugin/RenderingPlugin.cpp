@@ -15,6 +15,7 @@
 #include <iostream>
 #include <cmath>
 #include <thread>
+#include <mutex>
 #include <cstdio>
 #include <vector>
 #include <string>
@@ -22,9 +23,14 @@
 #include <map>
 
 using std::string;
+using std::mutex;
+using std::lock_guard;
 
 #include "ProducerConsumerQueue.h"
 #include "StopWatch.h"
+
+static mutex uniformMutex;
+#define GUARD_UNIFORMS lock_guard<mutex> guard(uniformMutex)
 
 #define NUM_VERTS 6
 
@@ -74,6 +80,7 @@ static FuncPtr _DebugFunc = nullptr;
 FuncPtr GetDebugFunc() { return _DebugFunc; }
 
 static bool verbose = false;
+static bool updateUniforms = true;
 static bool didInit = false;
 #if SUPPORT_D3D11
 static void updateUniformsD3D11(ID3D11DeviceContext* ctx);
@@ -520,7 +527,7 @@ static bool EnsureD3D11ResourcesAreCreated()
 	D3D11_DEPTH_STENCIL_DESC dsdesc;
 	memset (&dsdesc, 0, sizeof(dsdesc));
 	dsdesc.DepthEnable = TRUE;
-	dsdesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+	dsdesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
 	dsdesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
 	g_D3D11Device->CreateDepthStencilState (&dsdesc, &g_D3D11DepthState);
 
@@ -1219,7 +1226,8 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
 
-		updateUniformsD3D11(ctx);
+		if (updateUniforms)
+			updateUniformsD3D11(ctx);
 
 		// set shaders
 		
@@ -1492,27 +1500,32 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 		if (verbose) Debug("updateUniformsD3D11: no constant buffer");
 		return;
 	}
-	
+
 	UINT totalSize = 0;
-	int count = 0;
-	for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i)
-		if (i->second->size)
-			++count;
 
-	if (verbose) DebugSS("updateUniformsD3D11 updating " << count << " uniforms");
-	assert(d3d11ConstantBufferSize > 0);
-	ensureConstantBufferSize(d3d11ConstantBufferSize);
-	memset(constantBuffer, 0, d3d11ConstantBufferSize);
+	{
+		GUARD_UNIFORMS;
 
-	for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
-		auto prop = i->second;
-		if (prop->size > 0) {
-			assert((int)prop->offset + (int)prop->size <= (int)d3d11ConstantBufferSize);
+		int count = 0;
+		for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i)
+			if (i->second->size)
+				++count;
 
-			// TODO: use offsets into this buffer to set the values directly, and then strings
-			//       can just be a dictionary of string->offset.
-			memcpy(constantBuffer + prop->offset, &prop->value[0], prop->size);
-			if (verbose) DebugSS("update d3d uniform " << prop->name << " at offset " << prop->offset << " with size " << prop->size);
+		if (verbose) DebugSS("updateUniformsD3D11 updating " << count << " uniforms");
+		assert(d3d11ConstantBufferSize > 0);
+		ensureConstantBufferSize(d3d11ConstantBufferSize);
+		memset(constantBuffer, 0, d3d11ConstantBufferSize);
+
+		for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
+			auto prop = i->second;
+			if (prop->size > 0) {
+				assert((int)prop->offset + (int)prop->size <= (int)d3d11ConstantBufferSize);
+
+				// TODO: use offsets into this buffer to set the values directly, and then strings
+				//       can just be a dictionary of string->offset.
+				memcpy(constantBuffer + prop->offset, &prop->value[0], prop->size);
+				if (verbose) DebugSS("update d3d uniform " << prop->name << " at offset " << prop->offset << " with size " << prop->size);
+			}
 		}
 	}
 
@@ -1583,36 +1596,42 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
 UNITY_INTERFACE_EXPORT void ClearDebugFunction() { _DebugFunc = nullptr; }
 
 UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
+	GUARD_UNIFORMS;
     auto prop = propForName(name, Vector4);
     if (prop)
 		memcpy(prop->value, value, sizeof(float) * 4);
 }
     
 UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
+	GUARD_UNIFORMS;
     auto prop = propForName(name, Vector4);
 	if (prop)
 	    memcpy(value, prop->value, sizeof(float) * 4);
 }
 
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
+	GUARD_UNIFORMS;
     auto prop = propForName(name, Float);
 	if (prop)
 		memcpy(prop->value, &value, sizeof(float) * 1);
 }
 
 UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
+	GUARD_UNIFORMS;
     auto prop = propForName(name, Matrix);
 	if (prop)
 		memcpy(prop->value, value, sizeof(float) * 16);
 }
     
 UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
+	GUARD_UNIFORMS;
 	auto prop = propForName(name, Vector4);
 	if (prop)
 		memcpy(prop->value, value, sizeof(float) * 4);
 }
     
 UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
+	GUARD_UNIFORMS;
 	auto prop = propForName(name, Float);
 	return prop ? prop->value[0] : 0;
 }
@@ -1621,6 +1640,8 @@ UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) { return hasProp(name)
 UNITY_INTERFACE_EXPORT void Reset() { didInit = false; }
 UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
 UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shaderIncludePath = includePath; }
+
+UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
 	if (fragShader && fragEntryPoint) {
