@@ -331,7 +331,7 @@ struct CompileTask {
 
 		ID3DBlob *shaderBlob = nullptr;
 		ID3DBlob *error = nullptr;
-		StopWatch d3dCompileWatch;
+		//StopWatch d3dCompileWatch;
 		HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile.c_str(), defines, &shaderBlob, &error);
 
 		if (FAILED(hr)) {
@@ -340,7 +340,7 @@ struct CompileTask {
 			DebugSS("Could not compile shader:\n " << errstr);
 			if (error) error->Release();
 		} else {
-			DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
+			//DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
 
 			CompileTaskOutput output = { shaderType, shaderBlob };
 			if (!shaderCompilerOutputs.write(output))
@@ -785,7 +785,7 @@ static void MaybeCompileNewShaders() {
 	if (!getLatestShader(shaderSource))
 		return;
 
-	StopWatch loadingShaders;
+	//StopWatch loadingShaders;
 	
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
@@ -813,14 +813,13 @@ static void MaybeCompileNewShaders() {
     // D3D11 case
     if (s_DeviceType == kUnityGfxRendererD3D11)
     {
-		if (shaderSource.fragEntryPoint.size() && shaderSource.fragShader.size()) {
+		if (shaderSource.fragEntryPoint.size() && shaderSource.fragShader.size()) {			
 			CompileTask compileTask;
 			compileTask.shaderType = Fragment;
 			compileTask.entryPoint = shaderSource.fragEntryPoint;
 			compileTask.profile = "ps_5_0";
 			compileTask.src = shaderSource.fragShader;
 			compileTask.srcName = shaderIncludePath + "\\DUMMYfrag.hlsl";
-			Debug("Creating background thread to compile fragment shader");
 			std::thread compileThread(compileTask);
 			compileThread.detach();
 		}
@@ -832,7 +831,6 @@ static void MaybeCompileNewShaders() {
 			compileTask.profile = "vs_5_0";
 			compileTask.src = shaderSource.vertShader;
 			compileTask.srcName = shaderIncludePath + "\\DUMMYvert.hlsl";
-			Debug("Creating background thread to compile vertex shader");
 			std::thread compileThread(compileTask);
 			compileThread.detach();		
 		}
@@ -841,7 +839,7 @@ static void MaybeCompileNewShaders() {
 
 #endif
 
-	DebugSS("loading new shaders took " << loadingShaders.ElapsedMs() << " ms");
+	//DebugSS("loading new shaders took " << loadingShaders.ElapsedMs() << " ms");
 
 }
 
