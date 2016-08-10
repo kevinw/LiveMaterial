@@ -790,14 +790,14 @@ static void MaybeCompileNewShaders() {
 	
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
-        GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str());
+        GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), nullptr);
         if (newFrag) {
             if (g_FShader)
                 glDeleteShader(g_FShader);
             g_FShader = newFrag;
         }
         
-        GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str());
+        GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), nullptr);
         if (newVert) {
             if (g_VProg)
                 glDeleteShader(g_VProg);
