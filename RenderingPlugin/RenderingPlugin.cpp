@@ -1569,8 +1569,8 @@ UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shad
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
-#if SUPPORT_D3D
-	if (currentDeviceType == kUnityGfxRendererD3D11) {
+#ifdef SUPPORT_D3D
+	if (s_DeviceType == kUnityGfxRendererD3D11) {
     if (fragShader && fragEntryPoint) {
       CompileTask task;
       task.entryPoint = fragEntryPoint;
