@@ -14,11 +14,14 @@
 #include <cassert>
 #include <iostream>
 #include <cmath>
+#include <thread>
 #include <cstdio>
 #include <vector>
 #include <string>
 #include <fstream>
 #include <map>
+
+using std::string;
 
 #include "ProducerConsumerQueue.h"
 #include "StopWatch.h"
@@ -29,6 +32,11 @@
 struct ShaderProp;
 static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
 #endif
+
+enum ShaderType {
+	Vertex,
+	Fragment
+};
 
 // --------------------------------------------------------------------------
 // Include headers for the graphics APIs we support
@@ -75,14 +83,14 @@ static void clearUniforms();
 static void printUniforms();
 
 struct ShaderSource {
-    std::string fragShader;
-    std::string fragEntryPoint;
-    
-    std::string vertShader;
-    std::string vertEntryPoint;
+    string fragShader;
+    string fragEntryPoint;    
+    string vertShader;
+    string vertEntryPoint;
 };
 
 folly::ProducerConsumerQueue<ShaderSource> shaderSourceQueue(10);
+
 
 // --------------------------------------------------------------------------
 // Helper utilities
@@ -170,7 +178,7 @@ enum
 // --------------------------------------------------------------------------
 // SetUnityStreamingAssetsPath, an example function we export which is called by one of the scripts.
 
-static std::string shaderIncludePath;
+static string shaderIncludePath;
 
 static void INIT_MESSAGE(const char* msg) {
     if (!didInit) {
@@ -297,10 +305,55 @@ static GLuint	g_ArrayBuffer;
 static void LinkProgram();
 
 #if SUPPORT_D3D11
+
+
+struct CompileTaskOutput {
+	ShaderType shaderType;
+	ID3DBlob* shaderBlob;
+};
+
+folly::ProducerConsumerQueue<CompileTaskOutput> shaderCompilerOutputs(10);
 HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob);
+
+
+struct CompileTask {
+	ShaderType shaderType;
+	string src;
+	string srcName;
+	string entryPoint;
+	string profile;
+
+	void operator()() {
+		const D3D_SHADER_MACRO defines[] = {
+			"LIVE_MATERIAL", "1",
+			NULL, NULL
+		};
+
+		ID3DBlob *shaderBlob = nullptr;
+		ID3DBlob *error = nullptr;
+		StopWatch d3dCompileWatch;
+		HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile.c_str(), defines, &shaderBlob, &error);
+
+		if (FAILED(hr)) {
+			std::string errstr;
+			if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
+			DebugSS("Could not compile shader:\n " << errstr);
+			if (error) error->Release();
+		} else {
+			DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
+
+			CompileTaskOutput output = { shaderType, shaderBlob };
+			if (!shaderCompilerOutputs.write(output))
+				Debug("Shader compiler output queue is full");
+		}
+	}
+};
+
 #endif
 
+static void MaybeCompileNewShaders();
 static void MaybeLoadNewShaders();
+
 
 // --------------------------------------------------------------------------
 // OnRenderEvent
@@ -314,6 +367,7 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 	if (s_DeviceType == kUnityGfxRendererNull)
 		return;
 
+	MaybeCompileNewShaders();
 	MaybeLoadNewShaders();
 
 	MyVertex verts[NUM_VERTS] = {
@@ -366,7 +420,7 @@ extern "C" UnityRenderingEvent UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetRen
 
 #if SUPPORT_D3D11
 typedef std::vector<unsigned char> Buffer;
-bool LoadFileIntoBuffer(const std::string& fileName, Buffer& data)
+bool LoadFileIntoBuffer(string fileName, Buffer& data)
 {
 	FILE* fp;
 	fopen_s(&fp, fileName.c_str(), "rb");
@@ -385,7 +439,7 @@ bool LoadFileIntoBuffer(const std::string& fileName, Buffer& data)
 	}
 	else
 	{
-		std::string errorMessage = "Failed to find ";
+		string errorMessage = "Failed to find ";
 		errorMessage += fileName;
 		DebugLog(errorMessage.c_str());
 		return false;
@@ -503,9 +557,9 @@ static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 	}
 }
 
-static std::string toString(const WCHAR* wbuf) {
+static string toString(const WCHAR* wbuf) {
 	std::wstring wstr(wbuf);
-	std::string str(wstr.begin(), wstr.end());
+	string str(wstr.begin(), wstr.end());
 	return str;
 }
 
@@ -693,6 +747,40 @@ static bool getLatestShader(ShaderSource& shaderSource) {
 }
 
 static void MaybeLoadNewShaders() {
+	CompileTaskOutput compileTaskOutput;
+	while (shaderCompilerOutputs.read(compileTaskOutput)) {
+		ID3DBlob* shaderBlob = compileTaskOutput.shaderBlob;
+		assert(shaderBlob);
+
+		if (compileTaskOutput.shaderType == Fragment) {
+			constantBufferReflect(shaderBlob);
+			SAFE_RELEASE(g_D3D11PixelShader);
+			HRESULT hr = g_D3D11Device->CreatePixelShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &g_D3D11PixelShader);
+			if (FAILED(hr)) {
+				Debug("CreatePixelShader failed\n"); DebugHR(hr);
+			}
+			else {
+				Debug("loaded fragment shader");
+			}
+		}
+		else if (compileTaskOutput.shaderType == Vertex) {
+			SAFE_RELEASE(g_D3D11VertexShader);
+			HRESULT hr = g_D3D11Device->CreateVertexShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &g_D3D11VertexShader);
+			if (FAILED(hr)) {
+				Debug("CreateVertexShader failed");
+				DebugHR(hr);
+			}
+			else {
+				Debug("loaded vertex shader");
+			}
+		}
+		else {
+			assert(false);
+		}
+	}
+}
+
+static void MaybeCompileNewShaders() {
     ShaderSource shaderSource;
 	if (!getLatestShader(shaderSource))
 		return;
@@ -725,66 +813,28 @@ static void MaybeLoadNewShaders() {
     // D3D11 case
     if (s_DeviceType == kUnityGfxRendererD3D11)
     {
-		std::string filename = shaderIncludePath + "\\dummyfilename.cso";
-        
-		HRESULT hr = -1;
-
 		if (shaderSource.fragEntryPoint.size() && shaderSource.fragShader.size()) {
-			ID3DBlob *PS = nullptr;
-			ID3DBlob *error = nullptr;
-
-			const D3D_SHADER_MACRO defines[] = {
-				"FRAGMENT", "1",
-				NULL, NULL
-			};
-
-			hr = CompileShader(shaderSource.fragShader.c_str(), filename.c_str(), shaderSource.fragEntryPoint.c_str(), "ps_5_0", defines, &PS, &error);
-			if (FAILED(hr)) {
-				std::string errstr;
-				if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
-				DebugSS("Could not compile fragment shader:\n " << errstr);
-				if (error) error->Release();
-			} else {
-				constantBufferReflect(PS);
-				SAFE_RELEASE(g_D3D11PixelShader);
-				hr = g_D3D11Device->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), nullptr, &g_D3D11PixelShader);
-				if (FAILED(hr)) {
-					Debug("CreatePixelShader failed\n");
-					DebugHR(hr);
-				}
-				else {
-					Debug("loaded fragment shader");
-				}
-			}
+			CompileTask compileTask;
+			compileTask.shaderType = Fragment;
+			compileTask.entryPoint = shaderSource.fragEntryPoint;
+			compileTask.profile = "ps_5_0";
+			compileTask.src = shaderSource.fragShader;
+			compileTask.srcName = shaderIncludePath + "\\DUMMYfrag.hlsl";
+			Debug("Creating background thread to compile fragment shader");
+			std::thread compileThread(compileTask);
+			compileThread.detach();
 		}
 
 		if (shaderSource.vertEntryPoint.size() && shaderSource.vertShader.size()) {
-			ID3DBlob *VS = nullptr;
-			ID3DBlob *error = nullptr;
-
-			const D3D_SHADER_MACRO defines[] = {
-				"VERTEX", "1",
-				NULL, NULL
-			};
-			
-			hr = CompileShader(shaderSource.vertShader.c_str(), filename.c_str(), shaderSource.vertEntryPoint.c_str(), "vs_5_0", defines, &VS, &error);
-			if (FAILED(hr)) {
-				std::string errstr;
-				if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
-				DebugSS("Could not compile vertex shader:\n " << errstr);
-				if (error) error->Release();
-			} else {
-				SAFE_RELEASE(g_D3D11VertexShader);
-				
-				hr = g_D3D11Device->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), nullptr, &g_D3D11VertexShader);
-				if (FAILED(hr)) {
-					Debug("CreateVertexShader failed");
-					DebugHR(hr);
-				}
-				else {
-					Debug("loaded vertex shader");
-				}
-			}
+			CompileTask compileTask;
+			compileTask.shaderType = Vertex;
+			compileTask.entryPoint = shaderSource.vertEntryPoint;
+			compileTask.profile = "vs_5_0";
+			compileTask.src = shaderSource.vertShader;
+			compileTask.srcName = shaderIncludePath + "\\DUMMYvert.hlsl";
+			Debug("Creating background thread to compile vertex shader");
+			std::thread compileThread(compileTask);
+			compileThread.detach();		
 		}
     }
 
