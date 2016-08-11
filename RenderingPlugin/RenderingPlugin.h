@@ -48,6 +48,13 @@
 
 #include <sstream>
 
+enum PluginMessage {
+	NeedsSceneViewRepaint
+};
+
+typedef void(*PluginCallback)(PluginMessage mssage);
+
+
 typedef void(*FuncPtr)(const char *);
 FuncPtr GetDebugFunc();
 

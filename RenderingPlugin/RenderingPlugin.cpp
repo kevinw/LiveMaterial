@@ -75,6 +75,7 @@ enum ShaderType {
 #	endif
 #endif
 
+static PluginCallback PluginCallbackFunc = nullptr;
 static FuncPtr _DebugFunc = nullptr;
 
 FuncPtr GetDebugFunc() { return _DebugFunc; }
@@ -148,8 +149,6 @@ int printOglError(const char *file, int line) {
 }
 
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath);
-
-
 
 enum
 {
@@ -326,8 +325,14 @@ struct CompileTask {
 			//DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
 
 			CompileTaskOutput output = { shaderType, shaderBlob };
-			if (!shaderCompilerOutputs.write(output))
+			if (!shaderCompilerOutputs.write(output)) {
 				Debug("Shader compiler output queue is full");
+			} 
+			else {
+				if (PluginCallbackFunc)
+					PluginCallbackFunc(NeedsSceneViewRepaint);
+			}
+
 		}
 	}
 };
@@ -1512,6 +1517,10 @@ static void updateUniformsGL() {
 #endif
 
 extern "C" {
+
+UNITY_INTERFACE_EXPORT void SetPluginCallback(PluginCallback fp) {
+	PluginCallbackFunc = fp;
+}
 
 UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
     _DebugFunc = fp;
