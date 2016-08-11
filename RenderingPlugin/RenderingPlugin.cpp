@@ -280,8 +280,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 static GLuint	g_VProg   = 0;
 static GLuint	g_FShader = 0;
 static GLuint	g_Program = 0;
-static GLuint	g_VertexArray;
-static GLuint	g_ArrayBuffer;
 
 static void LinkProgram();
 
@@ -1021,10 +1019,6 @@ static void DoEventGraphicsDeviceGLUnified(UnityGfxDeviceEventType eventType)
 {
 	if (eventType == kUnityGfxDeviceEventInitialize)
 	{
-		glGenBuffers(1, &g_ArrayBuffer);
-		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(MyVertex) * NUM_VERTS, NULL, GL_STREAM_DRAW);
-        printOpenGLError();
 	}
 	else if (eventType == kUnityGfxDeviceEventShutdown)
 	{
@@ -1203,50 +1197,10 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
         updateUniformsGL();
         printOpenGLError();
 
-#if SUPPORT_OPENGL_CORE
-		if (s_DeviceType == kUnityGfxRendererOpenGLCore)
-		{
-			//glGenVertexArrays(1, &g_VertexArray);
-			//glBindVertexArray(g_VertexArray);
-		}
-        printOpenGLError();
-#endif
-
-        /*
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        printOpenGLError();
-        
-		glBindBuffer(GL_ARRAY_BUFFER, g_ArrayBuffer);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(MyVertex) * NUM_VERTS, &verts[0].x);
-        printOpenGLError();
-
-		glEnableVertexAttribArray(ATTRIB_POSITION);
-		glVertexAttribPointer(ATTRIB_POSITION, 3, GL_FLOAT, GL_FALSE, sizeof(MyVertex), BUFFER_OFFSET(0));
-        printOpenGLError();
-
-		glEnableVertexAttribArray(ATTRIB_COLOR);
-		glVertexAttribPointer(ATTRIB_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(MyVertex), BUFFER_OFFSET(sizeof(float) * 3));
-        printOpenGLError();
-        
-        glEnableVertexAttribArray(ATTRIB_UV);
-        glVertexAttribPointer(ATTRIB_UV, 2, GL_FLOAT, GL_TRUE, sizeof(MyVertex), (void*)offsetof(MyVertex, u));
-        */
-
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         printOpenGLError();
     
         INIT_MESSAGE("LiveMaterial is drawing with OpenGL ES/Core");
-        
-#if SUPPORT_OPENGL_CORE
-		if (s_DeviceType == kUnityGfxRendererOpenGLCore)
-		{
-			//glDeleteVertexArrays(1, &g_VertexArray);
-		}
-#endif
-
-        printOpenGLError();
-		//assert(glGetError() == GL_NO_ERROR);
-        
 	}
 	#endif
 }
