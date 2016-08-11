@@ -685,7 +685,7 @@ static void MaybeLoadNewShaders() {
 				Debug("CreatePixelShader failed\n"); DebugHR(hr);
 			}
 			else {
-				Debug("loaded fragment shader");
+				//Debug("loaded fragment shader");
 			}
 		}
 		else if (compileTaskOutput.shaderType == Vertex) {			
@@ -696,7 +696,7 @@ static void MaybeLoadNewShaders() {
 				DebugHR(hr);
 			}
 			else {
-				Debug("loaded vertex shader");
+				//Debug("loaded vertex shader");
 			}			
 		}
 		else {
