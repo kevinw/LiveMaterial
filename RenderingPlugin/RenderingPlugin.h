@@ -2,6 +2,8 @@
 
 #include "Unity/IUnityInterface.h"
 
+#include <string>
+using std::string;
 
 // Which platform we are on?
 #if _MSC_VER
@@ -65,3 +67,23 @@ FuncPtr GetDebugFunc();
         std::stringstream ss; ss << ssexp; std::string s(ss.str()); GetDebugFunc()(s.c_str()); \
     } \
 } while(0);
+
+struct ShaderSource {
+	string fragShader;
+	string fragEntryPoint;
+	string vertShader;
+	string vertEntryPoint;
+};
+
+enum ShaderType {
+	Vertex,
+	Fragment
+};
+
+struct CompileTask {
+	ShaderType shaderType;
+	string src;
+	string srcName;
+	string entryPoint;
+	void operator()();
+};
