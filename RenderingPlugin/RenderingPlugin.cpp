@@ -25,12 +25,58 @@
 using std::string;
 using std::mutex;
 using std::lock_guard;
+using std::vector;
 
 #include "ProducerConsumerQueue.h"
 #include "StopWatch.h"
 
+static mutex compileMutex;
+static std::condition_variable compileCV;
+static vector<CompileTask> pendingCompileTasks;
+static std::thread* compileThread;
+
+static void submitCompileTasks(vector<CompileTask> compileTasks) {
+	if (compileTasks.size() > 0) {
+		{
+			std::lock_guard<mutex> lock(compileMutex);
+			pendingCompileTasks = compileTasks; // TODO: should probably interleve frag/vert here
+		}
+		compileCV.notify_one();
+	}
+}
+
+static void compileThreadFunc() {
+	while (true) {
+		{
+			std::unique_lock<mutex> lk(compileMutex);
+			compileCV.wait(lk);
+		}
+
+		vector<CompileTask> compileTasks;
+
+		bool keepGoing = true;
+		while (keepGoing) {
+			{
+				std::lock_guard<std::mutex> lock(compileMutex);
+				compileTasks = pendingCompileTasks;
+				pendingCompileTasks.clear();
+			}
+
+			for (size_t i = 0; i < compileTasks.size(); ++i)
+				compileTasks[i]();
+
+			{
+				std::lock_guard<std::mutex> lock(compileMutex);
+				keepGoing = pendingCompileTasks.size() > 0;
+			}
+		}
+
+	}
+}
+
+
 static mutex uniformMutex;
-#define GUARD_UNIFORMS lock_guard<mutex> guard(uniformMutex)
+#define GUARD_UNIFORMS lock_guard<mutex> _lock_guard(uniformMutex)
 
 #define NUM_VERTS 6
 
@@ -38,11 +84,6 @@ static mutex uniformMutex;
 struct ShaderProp;
 static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
 #endif
-
-enum ShaderType {
-	Vertex,
-	Fragment
-};
 
 // --------------------------------------------------------------------------
 // Include headers for the graphics APIs we support
@@ -89,13 +130,6 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx);
 static void updateUniformsGL();
 static void clearUniforms();
 static void printUniforms();
-
-struct ShaderSource {
-    string fragShader;
-    string fragEntryPoint;    
-    string vertShader;
-    string vertEntryPoint;
-};
 
 folly::ProducerConsumerQueue<ShaderSource> shaderSourceQueue(10);
 
@@ -295,45 +329,40 @@ folly::ProducerConsumerQueue<CompileTaskOutput> shaderCompilerOutputs(10);
 HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob);
 
 
-struct CompileTask {
-	ShaderType shaderType;
-	string src;
-	string srcName;
-	string entryPoint;
+void CompileTask::operator()() {
+	const D3D_SHADER_MACRO defines[] = {
+		"LIVE_MATERIAL", "1",
+		NULL, NULL
+	};
 
-	void operator()() {
-		const D3D_SHADER_MACRO defines[] = {
-			"LIVE_MATERIAL", "1",
-			NULL, NULL
-		};
+	const char* profile = shaderType == Fragment ? "ps_5_0" : "vs_5_0";
 
-		const char* profile = shaderType == Fragment ? "ps_5_0" : "vs_5_0";
+	ID3DBlob *shaderBlob = nullptr;
+	ID3DBlob *error = nullptr;
+	//StopWatch d3dCompileWatch;
+	HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error);
 
-		ID3DBlob *shaderBlob = nullptr;
-		ID3DBlob *error = nullptr;
-		//StopWatch d3dCompileWatch;
-		HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error);
+	if (FAILED(hr)) {
+		std::string errstr;
+		if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
+		DebugSS("Could not compile shader:\n " << errstr);
+		
+	} else {
+		//DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
 
-		if (FAILED(hr)) {
-			std::string errstr;
-			if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
-			DebugSS("Could not compile shader:\n " << errstr);
-			if (error) error->Release();
-		} else {
-			//DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
-
-			CompileTaskOutput output = { shaderType, shaderBlob };
-			if (!shaderCompilerOutputs.write(output)) {
-				Debug("Shader compiler output queue is full");
-			} 
-			else {
-				if (PluginCallbackFunc)
-					PluginCallbackFunc(NeedsSceneViewRepaint);
-			}
-
+		CompileTaskOutput output = { shaderType, shaderBlob };
+		if (!shaderCompilerOutputs.write(output)) {
+			Debug("Shader compiler output queue is full");
+		} 
+		else {
+			if (PluginCallbackFunc)
+				PluginCallbackFunc(NeedsSceneViewRepaint);
 		}
+
 	}
-};
+	if (error)
+		error->Release();
+}
 
 #endif
 
@@ -405,7 +434,7 @@ extern "C" UnityRenderingEvent UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetRen
 // Shared code
 
 #if SUPPORT_D3D11
-typedef std::vector<unsigned char> Buffer;
+typedef vector<unsigned char> Buffer;
 bool LoadFileIntoBuffer(string fileName, Buffer& data)
 {
 	FILE* fp;
@@ -537,12 +566,15 @@ static void ReleaseD3D11Resources() {
 	Debug("... done releasing D3D11Resources.");
 }
 
+
 static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 {
 	if (eventType == kUnityGfxDeviceEventInitialize) {
 		IUnityGraphicsD3D11* d3d11 = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
 		g_D3D11Device = d3d11->GetDevice();		
 		EnsureD3D11ResourcesAreCreated();
+		compileThread = new std::thread(compileThreadFunc);
+		compileThread->detach();
 	} else if (eventType == kUnityGfxDeviceEventShutdown) {
 		ReleaseD3D11Resources();
 	}
@@ -1493,28 +1525,27 @@ UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = up
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
 #ifdef SUPPORT_D3D
 	if (s_DeviceType == kUnityGfxRendererD3D11) {
-    if (fragShader && fragEntryPoint) {
-      CompileTask task;
-      task.entryPoint = fragEntryPoint;
-      task.shaderType = Fragment;
-      task.src = fragShader;
-      task.srcName = shaderIncludePath + "\\fragment.hlsl";
+		vector<CompileTask> compileTasks;
+		if (fragShader && fragEntryPoint) {
+		  CompileTask task;
+		  task.entryPoint = fragEntryPoint;
+		  task.shaderType = Fragment;
+		  task.src = fragShader;
+		  task.srcName = shaderIncludePath + "\\fragment.hlsl";
+		  compileTasks.push_back(task);
+		}
+		if (vertexShader && vertEntryPoint) {
+		  CompileTask task;
+		  task.entryPoint = vertEntryPoint;
+		  task.shaderType = Vertex;
+		  task.src = vertexShader;
+		  task.srcName = shaderIncludePath + "\\vertex.hlsl";
+		  compileTasks.push_back(task);
+		}
 
-      std::thread compileThread(task);
-      compileThread.detach();
-    }
-    if (vertexShader && vertEntryPoint) {
-      CompileTask task;
-      task.entryPoint = vertEntryPoint;
-      task.shaderType = Vertex;
-      task.src = vertexShader;
-      task.srcName = shaderIncludePath + "\\vertex.hlsl";
+		submitCompileTasks(compileTasks);
 
-      std::thread compileThread(task);
-      compileThread.detach();
-    }
-
-    return;
+		return;
   }
 #endif 
   ShaderSource shaderSource;
