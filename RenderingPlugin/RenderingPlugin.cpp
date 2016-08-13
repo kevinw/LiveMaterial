@@ -636,15 +636,20 @@ static void constantBufferReflect(ID3DBlob* shader) {
 	std::stringstream fout;
 	if (verbose) fout << "Reflecting Constant Buffers (" << desc.ConstantBuffers << ")\n";
 
-	assert(desc.ConstantBuffers < 2); // TODO: if we add enough uniforms, do we need to split them into multiple buffers?
-	SAFE_RELEASE(d3d11ConstantBuffer);
+	// TODO: if we add enough uniforms, do we need to split them into multiple buffers?
+	if (desc.ConstantBuffers >= 2)
+		Debug("WARNING: more than one D3D11 constant buffer, not implemented!");
 
-	for (UINT i = 0; i < desc.ConstantBuffers; i++) {
+	SAFE_RELEASE(d3d11ConstantBuffer);
+	d3d11ConstantBufferSize = 0;
+
+	clearUniforms();
+
+	if (desc.ConstantBuffers > 0) {
 		D3D11_SHADER_BUFFER_DESC Description;
-		ID3D11ShaderReflectionConstantBuffer* pConstBuffer = pReflector->GetConstantBufferByIndex(i);
+		ID3D11ShaderReflectionConstantBuffer* pConstBuffer = pReflector->GetConstantBufferByIndex(0);
 		pConstBuffer->GetDesc(&Description);
 
-		d3d11ConstantBufferSize = 0;
 		for (UINT j = 0; j < Description.Variables; j++) {
 			ID3D11ShaderReflectionVariable* pVariable = pConstBuffer->GetVariableByIndex(j);
 			D3D11_SHADER_VARIABLE_DESC var_desc;
@@ -660,23 +665,26 @@ static void constantBufferReflect(ID3DBlob* shader) {
 			d3d11ConstantBufferSize = max(d3d11ConstantBufferSize, var_desc.StartOffset + var_desc.Size);
 		}
 		
-		d3d11ConstantBufferSize = roundUp(d3d11ConstantBufferSize, 16);
-		if (verbose) DebugSS("Allocating a constant buffer with size " << d3d11ConstantBufferSize);
 
-		// constant buffer
-		D3D11_BUFFER_DESC bufdesc;
-		memset(&bufdesc, 0, sizeof(bufdesc));
-		bufdesc.Usage = D3D11_USAGE_DEFAULT;
-		bufdesc.ByteWidth = d3d11ConstantBufferSize;
-		bufdesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-		bufdesc.CPUAccessFlags = 0;//D3D11_CPU_ACCESS_WRITE;
+		if (d3d11ConstantBufferSize > 0) {
+			d3d11ConstantBufferSize = roundUp(d3d11ConstantBufferSize, 16);
+			if (verbose) DebugSS("Allocating a constant buffer with size " << d3d11ConstantBufferSize);
 
-		//DebugSS("Creating a constant buffer with byte width " << d3d11ConstantBufferSize);
-		
-		HRESULT hr = g_D3D11Device->CreateBuffer(&bufdesc, NULL, &d3d11ConstantBuffer);
-		if (FAILED(hr)) {
-			Debug("ERROR: could not create constant buffer:");
-			DebugHR(hr);
+			// constant buffer
+			D3D11_BUFFER_DESC bufdesc;
+			memset(&bufdesc, 0, sizeof(bufdesc));
+			bufdesc.Usage = D3D11_USAGE_DEFAULT;
+			bufdesc.ByteWidth = d3d11ConstantBufferSize;
+			bufdesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			bufdesc.CPUAccessFlags = 0;//D3D11_CPU_ACCESS_WRITE;
+
+			//DebugSS("Creating a constant buffer with byte width " << d3d11ConstantBufferSize);
+
+			HRESULT hr = g_D3D11Device->CreateBuffer(&bufdesc, NULL, &d3d11ConstantBuffer);
+			if (FAILED(hr)) {
+				Debug("ERROR: could not create constant buffer:");
+				DebugHR(hr);
+			}
 		}
 	}
 	
@@ -1379,15 +1387,16 @@ static void printUniforms() {
 }
 
 static void clearUniforms() {
-    for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
+	GUARD_UNIFORMS;
+
 #if SUPPORT_OPENGL_UNIFIED
+	for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
         if (isOpenGLDevice(s_DeviceType)) {
             prop->uniformIndex = ShaderProp::UNIFORM_UNSET;
         }
-#endif
-        
     }
+#endif
     
     shaderProps.clear();
 }
@@ -1411,6 +1420,11 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 		if (verbose) Debug("updateUniformsD3D11: no constant buffer");
 		return;
 	}
+
+	if (d3d11ConstantBufferSize == 0) {
+		return;
+	}
+
 
 	UINT totalSize = 0;
 
