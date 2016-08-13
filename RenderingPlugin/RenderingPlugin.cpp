@@ -755,27 +755,32 @@ static void MaybeCompileNewShaders() {
 	
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
+        bool needsUpdate = false;
         if (shaderSource.fragShader.size() > 0) {
-          GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), nullptr);
+          GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), "/Users/kevin/Desktop/frag.glsl");
           if (newFrag) {
               if (g_FShader)
                   glDeleteShader(g_FShader);
               g_FShader = newFrag;
+              needsUpdate = true;
           }
         }
         
         if (shaderSource.vertShader.size() > 0) {
-          GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), nullptr);
+          GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), "/Users/kevin/Desktop/vert.glsl");
           if (newVert) {
               if (g_VProg)
                   glDeleteShader(g_VProg);
               g_VProg = newVert;
+              needsUpdate = true;
           }
         }
 
-        LinkProgram();
-        clearUniforms();
-        printOpenGLError();
+        if (needsUpdate) {
+          LinkProgram();
+          clearUniforms();
+          printOpenGLError();
+        }
     }
 #endif
     
@@ -931,87 +936,41 @@ static void DoEventGraphicsDeviceD3D12(UnityGfxDeviceEventType eventType)
 
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
 {
-   GLuint shader;
-   GLint compiled;
-   
-   // Create the shader object
-   shader = glCreateShader ( type );
-
-   if ( shader == 0 ) {
-     Debug("could not create shader object");
-   	return 0;
+   GLuint shader = glCreateShader ( type );
+   if (shader == 0) {
+       Debug("could not create shader object");
+   	   return 0;
    }
     
    if (debugOutPath)
-	   writeTextToFile(debugOutPath, shaderSrc);
+	     writeTextToFile(debugOutPath, shaderSrc);
     
-    if (verbose)
+   if (verbose)
       DebugSS("GLSL Version " << (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
     
-   // Load the shader source
    glShaderSource(shader, 1, &shaderSrc, NULL);
-
-   // Compile the shader
    glCompileShader(shader);
 
-   // Check the compile status
-   glGetShaderiv ( shader, GL_COMPILE_STATUS, &compiled );
-
-   if ( !compiled ) 
-   {
+   GLint compiled;
+   glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+   if (!compiled) {
        GLint infoLen = 0;
        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
-       Debug("error compiling shader:");
-      if (infoLen > 1) {
-         char* infoLog = (char*)malloc (sizeof(char) * infoLen);
-         glGetShaderInfoLog(shader, infoLen, NULL, infoLog);
-         Debug(infoLog);
-         free(infoLog);
-      }
+       Debug("error compiling glsl shader:");
+       if (infoLen > 1) {
+           char* infoLog = (char*)malloc (sizeof(char) * infoLen);
+           if (infoLog) {
+               glGetShaderInfoLog(shader, infoLen, NULL, infoLog);
+               Debug(infoLog);
+               free(infoLog);
+           }
+       }
 
-      glDeleteShader ( shader );
-      return 0;
+       glDeleteShader(shader);
+       return 0;
    }
 
    return shader;
-
-}
-
-static GLuint CreateShader(GLenum type, const char* text)
-{
-	GLuint shader = glCreateShader(type);
-	glShaderSource(shader, 1, &text, NULL);
-  Debug("compiling shader:");
-  Debug(text);
-	glCompileShader(shader);
-
-  GLint isCompiled = 0;
-  glGetShaderiv(shader, GL_COMPILE_STATUS, &isCompiled);
-  if (isCompiled == GL_FALSE) {
-    if (!glIsShader(shader)) {
-      Debug("Not a shader.");
-      return -1;
-    }
-
-    GLint maxLength = 0;
-    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &maxLength);
-
-    Debug("error compiling shader");
-
-    // The maxLength includes the NULL character
-    vector<GLchar> errorLog(maxLength);
-    glGetShaderInfoLog(shader, maxLength, &maxLength, &errorLog[0]);
-
-    Debug(errorLog.data());
-    printOpenGLError();
-
-    // Provide the infolog in whatever manor you deem best.
-    // Exit with failure.
-    glDeleteShader(shader); // Don't leak the shader.
-    return -1;
-  }
-
-	return shader;
 }
 
 static void LinkProgram() {
