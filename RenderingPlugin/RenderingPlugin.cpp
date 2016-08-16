@@ -624,6 +624,21 @@ static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
 	return reflector;
 }
 
+unsigned char* constantBuffer = nullptr;
+size_t constantBufferSize = 0;
+
+void ensureConstantBufferSize(size_t size) {
+	if (constantBufferSize < size) {
+		if (constantBuffer)
+			delete[] constantBuffer;
+
+		constantBuffer = new unsigned char[size];
+		constantBufferSize = size;
+	}
+}
+
+
+
 static void constantBufferReflect(ID3DBlob* shader) {	
 	assert(g_D3D11Device);
 	auto pReflector = shaderReflector(shader);
@@ -641,10 +656,11 @@ static void constantBufferReflect(ID3DBlob* shader) {
 		Debug("WARNING: more than one D3D11 constant buffer, not implemented!");
 
 	SAFE_RELEASE(d3d11ConstantBuffer);
-	d3d11ConstantBufferSize = 0;
 
+	GUARD_UNIFORMS;
 	clearUniforms();
-
+	d3d11ConstantBufferSize = 0;
+	
 	if (desc.ConstantBuffers > 0) {
 		D3D11_SHADER_BUFFER_DESC Description;
 		ID3D11ShaderReflectionConstantBuffer* pConstBuffer = pReflector->GetConstantBufferByIndex(0);
@@ -691,6 +707,9 @@ static void constantBufferReflect(ID3DBlob* shader) {
 	if (verbose) Debug(fout.str().c_str());
 
 	pReflector->Release();
+		
+	ensureConstantBufferSize(d3d11ConstantBufferSize);
+	memset(constantBuffer, 0, d3d11ConstantBufferSize);
 }
 
 
@@ -1232,14 +1251,16 @@ struct ShaderProp {
 		offset = 0;
 		size = 0;
 #endif
-		for (size_t i = 0; i < 16; ++i)
-			value[i] = 0.0f;
     }
     
     PropType type;
     const std::string typeString() { return propTypeStrings[(size_t)type]; }
     std::string name;
-    float value[16];
+	
+	float value(int n) {
+		if (!constantBuffer || size == 0) return 0.0f;
+		return *((float*)(constantBuffer + offset + n));
+	}
     
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
     static const int UNIFORM_UNSET = -2;
@@ -1314,6 +1335,8 @@ static ShaderProp* propForName(const char* name, PropType type) {
 }
 
 static void printUniforms() {
+	GUARD_UNIFORMS;
+
     std::stringstream ss;
     for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
         auto prop = i->second;
@@ -1328,14 +1351,14 @@ static void printUniforms() {
 
         switch (prop->type) {
             case Float:
-                ss << prop->value[0]; break;
+                ss << prop->value(0); break;
             case Vector2:
-                ss << prop->value[0] << " " << prop->value[1]; break;
+                ss << prop->value(0) << " " << prop->value(1); break;
             case Vector3:
-                ss << prop->value[0] << " " << prop->value[1] << " " << prop->value[2]; break;
+                ss << prop->value(0) << " " << prop->value(1) << " " << prop->value(2); break;
             case Vector4:
             case Matrix:
-                ss << prop->value[0] << " " << prop->value[1] << " " << prop->value[2] << " " << prop->value[3]; break;
+				ss << prop->value(0) << " " << prop->value(1) << " " << prop->value(2) << " " << prop->value(3); break;
             default:
                 assert(false);
         }
@@ -1345,8 +1368,11 @@ static void printUniforms() {
     Debug(s.c_str());
 }
 
+static void submitUniforms() {
+
+}
+
 static void clearUniforms() {
-	GUARD_UNIFORMS;
 
 #if SUPPORT_OPENGL_UNIFIED
 	for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
@@ -1360,60 +1386,13 @@ static void clearUniforms() {
     shaderProps.clear();
 }
 
-unsigned char* constantBuffer = nullptr;
-size_t constantBufferSize = 0;
-
-void ensureConstantBufferSize(size_t size) {
-	if (constantBufferSize < size) {
-		if (constantBuffer)
-			delete [] constantBuffer;
-
-		constantBuffer = new unsigned char[size];
-		constantBufferSize = size;
-	}
-}
-
 #if SUPPORT_D3D11
-static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
-	if (!d3d11ConstantBuffer) {
-		if (verbose) Debug("updateUniformsD3D11: no constant buffer");
-		return;
+static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {	
+	GUARD_UNIFORMS;
+
+	if (d3d11ConstantBuffer && d3d11ConstantBufferSize > 0) {
+		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, NULL, constantBuffer, d3d11ConstantBufferSize, 0);
 	}
-
-	if (d3d11ConstantBufferSize == 0) {
-		return;
-	}
-
-
-	UINT totalSize = 0;
-
-	{
-		GUARD_UNIFORMS;
-
-		int count = 0;
-		for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i)
-			if (i->second->size)
-				++count;
-
-		if (verbose) DebugSS("updateUniformsD3D11 updating " << count << " uniforms");
-		assert(d3d11ConstantBufferSize > 0);
-		ensureConstantBufferSize(d3d11ConstantBufferSize);
-		memset(constantBuffer, 0, d3d11ConstantBufferSize);
-
-		for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
-			auto prop = i->second;
-			if (prop->size > 0) {
-				assert((int)prop->offset + (int)prop->size <= (int)d3d11ConstantBufferSize);
-
-				// TODO: use offsets into this buffer to set the values directly, and then strings
-				//       can just be a dictionary of string->offset.
-				memcpy(constantBuffer + prop->offset, &prop->value[0], prop->size);
-				if (verbose) DebugSS("update d3d uniform " << prop->name << " at offset " << prop->offset << " with size " << prop->size);
-			}
-		}
-	}
-
-	ctx->UpdateSubresource(d3d11ConstantBuffer, 0, NULL, constantBuffer, totalSize, 0);
 }
 #endif
 
@@ -1442,21 +1421,21 @@ static void updateUniformsGL() {
         }
 		switch (prop->type) {
 		case Float:
-			glUniform1f(prop->uniformIndex, prop->value[0]);
+			glUniform1f(prop->uniformIndex, prop->value(0));
 			break;
 		case Vector2:
-			glUniform2f(prop->uniformIndex, prop->value[0], prop->value[1]);
+			glUniform2f(prop->uniformIndex, prop->value(0), prop->value(1));
 			break;
 		case Vector3:
-			glUniform3f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2]);
+			glUniform3f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2));
 			break;
 		case Vector4:
-			glUniform4f(prop->uniformIndex, prop->value[0], prop->value[1], prop->value[2], prop->value[3]);
+			glUniform4f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2), prop->value(3));
 			break;
 		case Matrix: {
 			const int numElements = 1;
 			const bool transpose = GL_FALSE;
-			glUniformMatrix4fv(prop->uniformIndex, numElements, transpose, prop->value);
+			glUniformMatrix4fv(prop->uniformIndex, numElements, transpose, ((float*)(constantBuffer + prop->offset)));
 			break;
 		}
 		default:
@@ -1489,44 +1468,51 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
 UNITY_INTERFACE_EXPORT void ClearDebugFunction() { _DebugFunc = nullptr; }
 
 UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
-	GUARD_UNIFORMS;
+	GUARD_UNIFORMS;	
+	if (!constantBuffer) return;
     auto prop = propForName(name, Vector4);
-    if (prop)
-		memcpy(prop->value, value, sizeof(float) * 4);
+	if (!prop) return;
+	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
 }
     
 UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
 	GUARD_UNIFORMS;
+	if (!constantBuffer) return;
     auto prop = propForName(name, Vector4);
-	if (prop)
-	    memcpy(value, prop->value, sizeof(float) * 4);
+	if (!prop) return;
+	memcpy(value, constantBuffer + prop->offset, sizeof(float) * 4);
 }
 
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
 	GUARD_UNIFORMS;
+	if (!constantBuffer) return;
     auto prop = propForName(name, Float);
-	if (prop)
-		memcpy(prop->value, &value, sizeof(float) * 1);
+	if (!prop) return;
+	memcpy(constantBuffer + prop->offset, &value, sizeof(float) * 1);
 }
 
 UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
 	GUARD_UNIFORMS;
+	if (!constantBuffer) return;
     auto prop = propForName(name, Matrix);
-	if (prop)
-		memcpy(prop->value, value, sizeof(float) * 16);
+	if (!prop) return;
+	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 16);
 }
     
 UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 	GUARD_UNIFORMS;
+	if (!constantBuffer) return;
 	auto prop = propForName(name, Vector4);
-	if (prop)
-		memcpy(prop->value, value, sizeof(float) * 4);
+	if (!prop) return;
+	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
 }
     
 UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
 	GUARD_UNIFORMS;
+	if (!constantBuffer) return 0.0f;
 	auto prop = propForName(name, Float);
-	return prop ? prop->value[0] : 0;
+	if (!prop) return 0.0f;
+	return *((float*)(constantBuffer + prop->offset));
 }
     
 UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) { return hasProp(name); }
@@ -1537,6 +1523,8 @@ UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shad
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 
 UNITY_INTERFACE_EXPORT void SetVerbose(bool verboseEnabled) { verbose = verboseEnabled; }
+
+UNITY_INTERFACE_EXPORT void SubmitUniforms() { submitUniforms(); }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
 #ifdef SUPPORT_D3D
