@@ -34,6 +34,9 @@ static mutex compileMutex;
 static std::condition_variable compileCV;
 static vector<CompileTask> pendingCompileTasks;
 static std::thread* compileThread;
+static size_t frameCount = 0;
+
+
 
 static void submitCompileTasks(vector<CompileTask> compileTasks) {
 	if (compileTasks.size() > 0) {
@@ -77,6 +80,12 @@ static void compileThreadFunc() {
 
 static mutex uniformMutex;
 #define GUARD_UNIFORMS lock_guard<mutex> _lock_guard(uniformMutex)
+
+static mutex callbackMutex;
+#define GUARD_CALLBACK lock_guard<mutex> _lock_guard(callbackMutex);
+
+static mutex gpuMutex;
+#define GUARD_GPU lock_guard<mutex> _lock_guard(gpuMutex);
 
 #define NUM_VERTS 6
 
@@ -355,6 +364,7 @@ void CompileTask::operator()() {
 			Debug("Shader compiler output queue is full");
 		} 
 		else {
+			GUARD_CALLBACK;
 			if (PluginCallbackFunc)
 				PluginCallbackFunc(NeedsSceneViewRepaint);
 		}
@@ -627,12 +637,19 @@ static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
 unsigned char* constantBuffer = nullptr;
 size_t constantBufferSize = 0;
 
+unsigned char* gpuBuffer = nullptr;
+
 void ensureConstantBufferSize(size_t size) {
 	if (constantBufferSize < size) {
 		if (constantBuffer)
 			delete[] constantBuffer;
 
+		if (gpuBuffer)
+			delete[] gpuBuffer;
+
 		constantBuffer = new unsigned char[size];
+		gpuBuffer = new unsigned char[size];
+
 		constantBufferSize = size;
 	}
 }
@@ -1113,7 +1130,6 @@ static void SetDefaultGraphicsState ()
 	#endif
 }
 
-
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
 {
 	// Does actual rendering of a simple triangle
@@ -1161,8 +1177,9 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
 
-		if (updateUniforms)
-			updateUniformsD3D11(ctx);
+		frameCount++;
+
+		updateUniformsD3D11(ctx);
 
 		// set shaders
 		
@@ -1256,7 +1273,8 @@ struct ShaderProp {
     PropType type;
     const std::string typeString() { return propTypeStrings[(size_t)type]; }
     std::string name;
-	
+
+
 	float value(int n) {
 		if (!constantBuffer || size == 0) return 0.0f;
 		return *((float*)(constantBuffer + offset + n));
@@ -1369,7 +1387,9 @@ static void printUniforms() {
 }
 
 static void submitUniforms() {
-
+	GUARD_GPU;
+	if (gpuBuffer && constantBuffer)
+		memcpy(gpuBuffer, constantBuffer, constantBufferSize);
 }
 
 static void clearUniforms() {
@@ -1386,12 +1406,21 @@ static void clearUniforms() {
     shaderProps.clear();
 }
 
+static void logprop(const char* name) {
+	auto prop = propForName(name, PropType::Float);
+	if (prop) {
+		DebugSS(name << ": " << prop->value(0) << std::endl);
+	}
+	else {
+		Debug("no BoxEnabled prop");
+	}
+}
+
 #if SUPPORT_D3D11
 static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {	
-	GUARD_UNIFORMS;
-
+	GUARD_GPU;
 	if (d3d11ConstantBuffer && d3d11ConstantBufferSize > 0) {
-		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, NULL, constantBuffer, d3d11ConstantBufferSize, 0);
+		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, 0, constantBuffer, 0, 0);
 	}
 }
 #endif
@@ -1457,6 +1486,7 @@ static void updateUniformsGL() {
 extern "C" {
 
 UNITY_INTERFACE_EXPORT void SetPluginCallback(PluginCallback fp) {
+	GUARD_CALLBACK;
 	PluginCallbackFunc = fp;
 }
 
@@ -1474,14 +1504,7 @@ UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
 	if (!prop) return;
 	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
 }
-    
-UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
-	GUARD_UNIFORMS;
-	if (!constantBuffer) return;
-    auto prop = propForName(name, Vector4);
-	if (!prop) return;
-	memcpy(value, constantBuffer + prop->offset, sizeof(float) * 4);
-}
+
 
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
 	GUARD_UNIFORMS;
@@ -1506,11 +1529,20 @@ UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 	if (!prop) return;
 	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
 }
+
+
+UNITY_INTERFACE_EXPORT void GetVector4(const char* name, float* value) {
+	GUARD_UNIFORMS;
+	if (!constantBuffer) return;
+	auto prop = propForName(name, Vector4);
+	if (!prop) return;
+	memcpy(value, constantBuffer + prop->offset, sizeof(float) * 4);
+}
     
 UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
 	GUARD_UNIFORMS;
 	if (!constantBuffer) return 0.0f;
-	auto prop = propForName(name, Float);
+	auto prop = propForName(name, Float);	
 	if (!prop) return 0.0f;
 	return *((float*)(constantBuffer + prop->offset));
 }
