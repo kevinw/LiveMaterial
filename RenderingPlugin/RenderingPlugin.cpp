@@ -1536,6 +1536,8 @@ UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shad
 
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 
+UNITY_INTERFACE_EXPORT void SetVerbose(bool verboseEnabled) { verbose = verboseEnabled; }
+
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
 #ifdef SUPPORT_D3D
 	if (s_DeviceType == kUnityGfxRendererD3D11) {
