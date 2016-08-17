@@ -247,8 +247,10 @@ const char* getGLTypeName(GLenum typeEnum) {
 
 #endif
 
+#ifdef SUPPORT_D3D
 static vector<ID3D11ShaderResourceView*> resourceViews;
 static std::map<string, size_t> resourceViewIndexes;
+#endif
 
 
 
@@ -1402,7 +1404,7 @@ struct ShaderProp {
 
 	float value(int n) {
 		if (!constantBuffer || size == 0) return 0.0f;
-		return *((float*)(constantBuffer + offset + n));
+		return *((float*)(constantBuffer + offset + n * sizeof(float)));
 	}
     
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
@@ -1550,8 +1552,11 @@ static void DiscoverGLUniforms(GLuint program) {
                 
                 assert(false);
         }
-      DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
-      propForNameSizeOffset(name, size, offset);
+      //DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
+      auto prop = propForNameSizeOffset(name, size, offset);
+      prop->uniformIndex = glGetUniformLocation(program, name);
+
+
       printOpenGLError();
       offset += size;
     }
@@ -1593,15 +1598,9 @@ static void updateUniformsGL() {
     
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
-        if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
+        if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET || prop->uniformIndex == prop->UNIFORM_INVALID) {
+            //errors << "invalid shader variable " << prop->name << "\n";
             continue;
-        if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
-            prop->uniformIndex = glGetUniformLocation(g_Program, prop->name.c_str());
-            if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID) {
-                errors << "invalid uniform: " << prop->name << std::endl;
-                continue;
-            }
-            assert(prop->uniformIndex != ShaderProp::UNIFORM_UNSET);
         }
 		switch (prop->type) {
 		case Float:
@@ -1611,7 +1610,7 @@ static void updateUniformsGL() {
 			glUniform2f(prop->uniformIndex, prop->value(0), prop->value(1));
 			break;
 		case Vector3:
-			glUniform3f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2));
+            glUniform3f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2));
 			break;
 		case Vector4:
 			glUniform4f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2), prop->value(3));
@@ -1631,8 +1630,6 @@ static void updateUniformsGL() {
             
         if (printOpenGLError())
             DebugSS("error setting uniform " << prop->name << " with type " << prop->typeString() << " and uniform index " << prop->uniformIndex);
-            
-		DebugSS("updated uniform " << i->second->name << " with index " << i->second->uniformIndex);
    
     }
 }
