@@ -33,8 +33,10 @@ using std::vector;
 static mutex compileMutex;
 static std::condition_variable compileCV;
 static vector<CompileTask> pendingCompileTasks;
+
+#ifdef SUPPORT_D3D
 static std::thread* compileThread;
-static size_t frameCount = 0;
+#endif
 
 
 
@@ -89,10 +91,8 @@ static mutex gpuMutex;
 
 #define NUM_VERTS 6
 
-#ifdef SUPPORT_D3D
 struct ShaderProp;
 static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
-#endif
 
 // --------------------------------------------------------------------------
 // Include headers for the graphics APIs we support
@@ -138,10 +138,114 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx);
 #endif
 static void updateUniformsGL();
 static void clearUniforms();
+#if SUPPORT_OPENGL_UNIFIED
+static void DiscoverGLUniforms(GLuint program);
+#endif
 static void printUniforms();
 
 folly::ProducerConsumerQueue<ShaderSource> shaderSourceQueue(10);
 
+#if SUPPORT_OPENGL_UNIFIED
+
+struct GLTypeTable {
+  GLenum type;
+  const char* typeName;
+  const char* glslTypeName;
+};
+
+static GLTypeTable glTypeTable[] = {
+  {GL_FLOAT, "GL_FLOAT",	"float"},
+  {GL_FLOAT_VEC2, "GL_FLOAT_VEC2",	"vec2"},
+  {GL_FLOAT_VEC3, "GL_FLOAT_VEC3",	"vec3"},
+  {GL_FLOAT_VEC4, "GL_FLOAT_VEC4",	"vec4"},
+  {GL_DOUBLE, "GL_DOUBLE",	"double"},
+  {GL_DOUBLE_VEC2, "GL_DOUBLE_VEC2",	"dvec2"},
+  {GL_DOUBLE_VEC3, "GL_DOUBLE_VEC3",	"dvec3"},
+  {GL_DOUBLE_VEC4, "GL_DOUBLE_VEC4",	"dvec4"},
+  {GL_INT, "GL_INT",	"int"},
+  {GL_INT_VEC2, "GL_INT_VEC2",	"ivec2"},
+  {GL_INT_VEC3, "GL_INT_VEC3",	"ivec3"},
+  {GL_INT_VEC4, "GL_INT_VEC4",	"ivec4"},
+  {GL_UNSIGNED_INT, "GL_UNSIGNED_INT",	"unsigned int"},
+  {GL_UNSIGNED_INT_VEC2, "GL_UNSIGNED_INT_VEC2",	"uvec2"},
+  {GL_UNSIGNED_INT_VEC3, "GL_UNSIGNED_INT_VEC3",	"uvec3"},
+  {GL_UNSIGNED_INT_VEC4, "GL_UNSIGNED_INT_VEC4",	"uvec4"},
+  {GL_BOOL, "GL_BOOL",	"bool"},
+  {GL_BOOL_VEC2, "GL_BOOL_VEC2",	"bvec2"},
+  {GL_BOOL_VEC3, "GL_BOOL_VEC3",	"bvec3"},
+  {GL_BOOL_VEC4, "GL_BOOL_VEC4",	"bvec4"},
+  {GL_FLOAT_MAT2, "GL_FLOAT_MAT2",	"mat2"},
+  {GL_FLOAT_MAT3, "GL_FLOAT_MAT3",	"mat3"},
+  {GL_FLOAT_MAT4, "GL_FLOAT_MAT4",	"mat4"},
+  {GL_FLOAT_MAT2x3, "GL_FLOAT_MAT2x3",	"mat2x3"},
+  {GL_FLOAT_MAT2x4, "GL_FLOAT_MAT2x4",	"mat2x4"},
+  {GL_FLOAT_MAT3x2, "GL_FLOAT_MAT3x2",	"mat3x2"},
+  {GL_FLOAT_MAT3x4, "GL_FLOAT_MAT3x4",	"mat3x4"},
+  {GL_FLOAT_MAT4x2, "GL_FLOAT_MAT4x2",	"mat4x2"},
+  {GL_FLOAT_MAT4x3, "GL_FLOAT_MAT4x3",	"mat4x3"},
+  {GL_DOUBLE_MAT2, "GL_DOUBLE_MAT2",	"dmat2"},
+  {GL_DOUBLE_MAT3, "GL_DOUBLE_MAT3",	"dmat3"},
+  {GL_DOUBLE_MAT4, "GL_DOUBLE_MAT4",	"dmat4"},
+  {GL_DOUBLE_MAT2x3, "GL_DOUBLE_MAT2x3",	"dmat2x3"},
+  {GL_DOUBLE_MAT2x4, "GL_DOUBLE_MAT2x4",	"dmat2x4"},
+  {GL_DOUBLE_MAT3x2, "GL_DOUBLE_MAT3x2",	"dmat3x2"},
+  {GL_DOUBLE_MAT3x4, "GL_DOUBLE_MAT3x4",	"dmat3x4"},
+  {GL_DOUBLE_MAT4x2, "GL_DOUBLE_MAT4x2",	"dmat4x2"},
+  {GL_DOUBLE_MAT4x3, "GL_DOUBLE_MAT4x3",	"dmat4x3"},
+  {GL_SAMPLER_1D, "GL_SAMPLER_1D",	"sampler1D"},
+  {GL_SAMPLER_2D, "GL_SAMPLER_2D",	"sampler2D"},
+  {GL_SAMPLER_3D, "GL_SAMPLER_3D",	"sampler3D"},
+  {GL_SAMPLER_CUBE, "GL_SAMPLER_CUBE",	"samplerCube"},
+  {GL_SAMPLER_1D_SHADOW, "GL_SAMPLER_1D_SHADOW",	"sampler1DShadow"},
+  {GL_SAMPLER_2D_SHADOW, "GL_SAMPLER_2D_SHADOW",	"sampler2DShadow"},
+  {GL_SAMPLER_1D_ARRAY, "GL_SAMPLER_1D_ARRAY",	"sampler1DArray"},
+  {GL_SAMPLER_2D_ARRAY, "GL_SAMPLER_2D_ARRAY",	"sampler2DArray"},
+  {GL_SAMPLER_1D_ARRAY_SHADOW, "GL_SAMPLER_1D_ARRAY_SHADOW",	"sampler1DArrayShadow"},
+  {GL_SAMPLER_2D_ARRAY_SHADOW, "GL_SAMPLER_2D_ARRAY_SHADOW",	"sampler2DArrayShadow"},
+  {GL_SAMPLER_2D_MULTISAMPLE, "GL_SAMPLER_2D_MULTISAMPLE",	"sampler2DMS"},
+  {GL_SAMPLER_2D_MULTISAMPLE_ARRAY, "GL_SAMPLER_2D_MULTISAMPLE_ARRAY",	"sampler2DMSArray"},
+  {GL_SAMPLER_CUBE_SHADOW, "GL_SAMPLER_CUBE_SHADOW",	"samplerCubeShadow"},
+  {GL_SAMPLER_BUFFER, "GL_SAMPLER_BUFFER",	"samplerBuffer"},
+  {GL_SAMPLER_2D_RECT, "GL_SAMPLER_2D_RECT",	"sampler2DRect"},
+  {GL_SAMPLER_2D_RECT_SHADOW, "GL_SAMPLER_2D_RECT_SHADOW",	"sampler2DRectShadow"},
+  {GL_INT_SAMPLER_1D, "GL_INT_SAMPLER_1D",	"isampler1D"},
+  {GL_INT_SAMPLER_2D, "GL_INT_SAMPLER_2D",	"isampler2D"},
+  {GL_INT_SAMPLER_3D, "GL_INT_SAMPLER_3D",	"isampler3D"},
+  {GL_INT_SAMPLER_CUBE, "GL_INT_SAMPLER_CUBE",	"isamplerCube"},
+  {GL_INT_SAMPLER_1D_ARRAY, "GL_INT_SAMPLER_1D_ARRAY",	"isampler1DArray"},
+  {GL_INT_SAMPLER_2D_ARRAY, "GL_INT_SAMPLER_2D_ARRAY",	"isampler2DArray"},
+  {GL_INT_SAMPLER_2D_MULTISAMPLE, "GL_INT_SAMPLER_2D_MULTISAMPLE",	"isampler2DMS"},
+  {GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY, "GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY",	"isampler2DMSArray"},
+  {GL_INT_SAMPLER_BUFFER, "GL_INT_SAMPLER_BUFFER",	"isamplerBuffer"},
+  {GL_INT_SAMPLER_2D_RECT, "GL_INT_SAMPLER_2D_RECT",	"isampler2DRect"},
+  {GL_UNSIGNED_INT_SAMPLER_1D, "GL_UNSIGNED_INT_SAMPLER_1D",	"usampler1D"},
+  {GL_UNSIGNED_INT_SAMPLER_2D, "GL_UNSIGNED_INT_SAMPLER_2D",	"usampler2D"},
+  {GL_UNSIGNED_INT_SAMPLER_3D, "GL_UNSIGNED_INT_SAMPLER_3D",	"usampler3D"},
+  {GL_UNSIGNED_INT_SAMPLER_CUBE, "GL_UNSIGNED_INT_SAMPLER_CUBE",	"usamplerCube"},
+  {GL_UNSIGNED_INT_SAMPLER_1D_ARRAY, "GL_UNSIGNED_INT_SAMPLER_1D_ARRAY",	"usampler2DArray"},
+  {GL_UNSIGNED_INT_SAMPLER_2D_ARRAY, "GL_UNSIGNED_INT_SAMPLER_2D_ARRAY",	"usampler2DArray"},
+  {GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE, "GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE",	"usampler2DMS"},
+  {GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY, "GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY",	"usampler2DMSArray"},
+  {GL_UNSIGNED_INT_SAMPLER_BUFFER, "GL_UNSIGNED_INT_SAMPLER_BUFFER",	"usamplerBuffer"},
+  {GL_UNSIGNED_INT_SAMPLER_2D_RECT, "GL_UNSIGNED_INT_SAMPLER_2D_RECT",	"usampler2DRect"},
+  {0, nullptr, nullptr}
+};
+
+const char* getGLTypeName(GLenum typeEnum) {
+    int i = 0;
+    
+    GLTypeTable entry = glTypeTable[i];
+    while (entry.typeName) {
+        if (entry.type == typeEnum)
+            return entry.typeName;
+        
+        entry = glTypeTable[++i];
+    }
+    
+    return nullptr;
+}
+
+#endif
 
 // --------------------------------------------------------------------------
 // Helper utilities
@@ -378,6 +482,27 @@ void CompileTask::operator()() {
 
 static void MaybeCompileNewShaders();
 static void MaybeLoadNewShaders();
+
+unsigned char* constantBuffer = nullptr;
+size_t constantBufferSize = 0;
+
+unsigned char* gpuBuffer = nullptr;
+
+void ensureConstantBufferSize(size_t size) {
+	if (constantBufferSize < size) {
+		if (constantBuffer)
+			delete[] constantBuffer;
+
+		if (gpuBuffer)
+			delete[] gpuBuffer;
+
+		constantBuffer = new unsigned char[size];
+		gpuBuffer = new unsigned char[size];
+
+		constantBufferSize = size;
+	}
+}
+
 
 
 // --------------------------------------------------------------------------
@@ -634,27 +759,6 @@ static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
 	return reflector;
 }
 
-unsigned char* constantBuffer = nullptr;
-size_t constantBufferSize = 0;
-
-unsigned char* gpuBuffer = nullptr;
-
-void ensureConstantBufferSize(size_t size) {
-	if (constantBufferSize < size) {
-		if (constantBuffer)
-			delete[] constantBuffer;
-
-		if (gpuBuffer)
-			delete[] gpuBuffer;
-
-		constantBuffer = new unsigned char[size];
-		gpuBuffer = new unsigned char[size];
-
-		constantBufferSize = size;
-	}
-}
-
-
 
 static void constantBufferReflect(ID3DBlob* shader) {	
 	assert(g_D3D11Device);
@@ -814,38 +918,15 @@ static void MaybeCompileNewShaders() {
 
         if (needsUpdate) {
           LinkProgram();
-          clearUniforms();
+          {
+            GUARD_UNIFORMS;
+            clearUniforms();
+            if (g_Program)
+              DiscoverGLUniforms(g_Program);
+          }
           printOpenGLError();
         }
     }
-#endif
-    
-#if SUPPORT_D3D11
-    // D3D11 case
-    if (s_DeviceType == kUnityGfxRendererD3D11)
-    {
-		if (shaderSource.fragEntryPoint.size() && shaderSource.fragShader.size()) {			
-			CompileTask compileTask;
-			compileTask.shaderType = Fragment;
-			compileTask.entryPoint = shaderSource.fragEntryPoint;
-			compileTask.src = shaderSource.fragShader;
-			compileTask.srcName = shaderIncludePath + "\\DUMMYfrag.hlsl";
-			std::thread compileThread(compileTask);
-			compileThread.detach();
-		}
-
-		if (shaderSource.vertEntryPoint.size() && shaderSource.vertShader.size()) {
-			CompileTask compileTask;
-			compileTask.shaderType = Vertex;
-			compileTask.entryPoint = shaderSource.vertEntryPoint;
-			compileTask.src = shaderSource.vertShader;
-			compileTask.srcName = shaderIncludePath + "\\DUMMYvert.hlsl";
-			std::thread compileThread(compileTask);
-			compileThread.detach();		
-		}
-    }
-
-
 #endif
 
 	//DebugSS("loading new shaders took " << loadingShaders.ElapsedMs() << " ms");
@@ -968,8 +1049,6 @@ static void DoEventGraphicsDeviceD3D12(UnityGfxDeviceEventType eventType)
 
 
 #if SUPPORT_OPENGL_UNIFIED
-
-
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
 {
    GLuint shader = glCreateShader ( type );
@@ -1177,8 +1256,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
 
-		frameCount++;
-
 		updateUniformsD3D11(ctx);
 
 		// set shaders
@@ -1264,10 +1341,8 @@ struct ShaderProp {
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
         uniformIndex = UNIFORM_UNSET;
 #endif
-#ifdef SUPPORT_D3D
 		offset = 0;
 		size = 0;
-#endif
     }
     
     PropType type;
@@ -1286,7 +1361,6 @@ struct ShaderProp {
     int uniformIndex;
 #endif
 
-#ifdef SUPPORT_D3D
 	uint16_t offset;
 	uint16_t size;
 
@@ -1304,9 +1378,6 @@ struct ShaderProp {
 		}
 		}
 	}
-#endif
-    
-    
 };
 
 typedef std::map<std::string, ShaderProp*> PropMap;
@@ -1325,7 +1396,6 @@ static ShaderProp* _lookupPropByName(const char* name) {
 
 #define SAFE_DELETE(x) do { if (x) delete (x); } while(0); 
 
-#ifdef SUPPORT_D3D
 static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset) {
 	auto prop = _lookupPropByName(name);
 	if (!prop || prop->size != size || prop->offset != offset) {
@@ -1340,7 +1410,6 @@ static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16
 
 	return prop;
 }
-#endif
 
 static ShaderProp* propForName(const char* name, PropType type) {
     auto prop = _lookupPropByName(name);
@@ -1393,18 +1462,56 @@ static void submitUniforms() {
 }
 
 static void clearUniforms() {
-
-#if SUPPORT_OPENGL_UNIFIED
-	for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
-        auto prop = i->second;
-        if (isOpenGLDevice(s_DeviceType)) {
-            prop->uniformIndex = ShaderProp::UNIFORM_UNSET;
-        }
-    }
-#endif
-    
     shaderProps.clear();
 }
+
+#if SUPPORT_OPENGL_UNIFIED
+static void DiscoverGLUniforms(GLuint program) {
+  int maxNameLength = 0;
+  glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxNameLength);
+  if (maxNameLength == 0) {
+    Debug("max name length was 0");
+    return;
+  }
+
+  char* name = new char[maxNameLength + 1];
+
+  int numUniforms = 0;
+  glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &numUniforms);
+  int offset = 0;
+  if (!printOpenGLError()) {
+    for (int i = 0; i < numUniforms; i++) {
+      int nameLength = 0;
+      int size = 0;
+      GLenum type;
+      glGetActiveUniform(program, i, maxNameLength, &nameLength, &size, &type, name);
+        assert(size == 1);
+        switch (type) {
+            case GL_FLOAT: size = sizeof(float); break;
+            case GL_FLOAT_VEC2: size = 2 * sizeof(float); break;
+            case GL_FLOAT_VEC3: size = 3 * sizeof(float); break;
+            case GL_FLOAT_VEC4: size = 4 * sizeof(float); break;
+            case GL_FLOAT_MAT4: size = 16 * sizeof(float); break;
+            default:
+                const char* typeName = getGLTypeName(type);
+                if (typeName == nullptr) typeName = "unknown";
+                DebugSS("unknown gl type " << typeName);
+                
+                
+                assert(false);
+        }
+      DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
+      propForNameSizeOffset(name, size, offset);
+      printOpenGLError();
+      offset += size;
+    }
+  }
+
+  delete [] name;
+
+  ensureConstantBufferSize(offset);
+}
+#endif
 
 static void logprop(const char* name) {
 	auto prop = propForName(name, PropType::Float);
@@ -1417,10 +1524,10 @@ static void logprop(const char* name) {
 }
 
 #if SUPPORT_D3D11
-static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {	
+static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 	GUARD_GPU;
 	if (d3d11ConstantBuffer && d3d11ConstantBufferSize > 0) {
-		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, 0, constantBuffer, 0, 0);
+		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, 0, gpuBuffer, 0, 0);
 	}
 }
 #endif
@@ -1436,8 +1543,6 @@ static void updateUniformsGL() {
     
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
-       
-
         if (prop->uniformIndex == ShaderProp::UNIFORM_INVALID)
             continue;
         if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET) {
@@ -1477,7 +1582,7 @@ static void updateUniformsGL() {
         if (printOpenGLError())
             DebugSS("error setting uniform " << prop->name << " with type " << prop->typeString() << " and uniform index " << prop->uniformIndex);
             
-		//DebugSS("updated uniform " << i->second->name << " with index " << i->second->uniformIndex);
+		DebugSS("updated uniform " << i->second->name << " with index " << i->second->uniformIndex);
    
     }
 }
