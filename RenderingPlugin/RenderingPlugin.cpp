@@ -247,6 +247,11 @@ const char* getGLTypeName(GLenum typeEnum) {
 
 #endif
 
+static vector<ID3D11ShaderResourceView*> resourceViews;
+static std::map<string, size_t> resourceViewIndexes;
+
+
+
 // --------------------------------------------------------------------------
 // Helper utilities
 
@@ -688,6 +693,7 @@ static void ReleaseD3D11Resources() {
 	ctx->VSSetShader(NULL, NULL, 0);
 	ctx->PSSetShader(NULL, NULL, 0);
 	ctx->PSSetConstantBuffers(0, 0, NULL);
+	ctx->PSSetShaderResources(0, 0, nullptr);
 	ctx->Release();
 
 	Debug("Releasing D3D11Resources...");
@@ -759,6 +765,13 @@ static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
 	return reflector;
 }
 
+bool DX_CHECK(HRESULT hr) {
+	if (FAILED(hr)) {
+		DebugHR(hr);
+		return false;
+	} else
+		return true;
+}
 
 static void constantBufferReflect(ID3DBlob* shader) {	
 	assert(g_D3D11Device);
@@ -768,10 +781,45 @@ static void constantBufferReflect(ID3DBlob* shader) {
 
 	D3D11_SHADER_DESC desc;
 	pReflector->GetDesc(&desc);
+
+	UINT maxBind = 0;
+	for (UINT i = 0; i < desc.BoundResources; ++i) {
+		D3D11_SHADER_INPUT_BIND_DESC inputBindDesc;
+		if (DX_CHECK(pReflector->GetResourceBindingDesc(i, &inputBindDesc))) {
+			maxBind = max(maxBind, inputBindDesc.BindPoint);
+		}
+	}
+
+	for (size_t i = 0; i < resourceViews.size(); ++i) {
+		SAFE_RELEASE(resourceViews[i]);
+	}
+	resourceViews.clear();
+	for (UINT i = 0; i < maxBind + 1; ++i) {
+		resourceViews.push_back(nullptr);
+	}
+
+
+	for (UINT i = 0; i < desc.BoundResources; ++i) {
+		D3D11_SHADER_INPUT_BIND_DESC inputBindDesc;
+		if (DX_CHECK(pReflector->GetResourceBindingDesc(i, &inputBindDesc))) {
+			resourceViewIndexes[inputBindDesc.Name] = inputBindDesc.BindPoint;
+			/*
+			DebugSS(
+				"input bind "   << inputBindDesc.Name << " with index " << i << "\n" <<
+				"  BindPoint  " << inputBindDesc.BindPoint << "\n" <<
+				"  Dimension  " << inputBindDesc.Dimension << "\n" <<
+				"  NumSamples " << inputBindDesc.NumSamples << "\n" <<
+				"  ReturnType " << inputBindDesc.ReturnType << "\n" <<
+				"  Type       " << inputBindDesc.Type << "\n" <<
+				"  BindCount  " << inputBindDesc.BindCount << "\n" <<
+				"  uFlags     " << inputBindDesc.uFlags << "\n");
+			*/
+		}
+	}
 	
 	std::stringstream fout;
 	if (verbose) fout << "Reflecting Constant Buffers (" << desc.ConstantBuffers << ")\n";
-
+		
 	// TODO: if we add enough uniforms, do we need to split them into multiple buffers?
 	if (desc.ConstantBuffers >= 2)
 		Debug("WARNING: more than one D3D11 constant buffer, not implemented!");
@@ -780,7 +828,7 @@ static void constantBufferReflect(ID3DBlob* shader) {
 
 	GUARD_UNIFORMS;
 	clearUniforms();
-	d3d11ConstantBufferSize = 0;
+	d3d11ConstantBufferSize = 0;	
 	
 	if (desc.ConstantBuffers > 0) {
 		D3D11_SHADER_BUFFER_DESC Description;
@@ -1263,6 +1311,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		ctx->VSSetShader (g_D3D11VertexShader, NULL, 0);		
 		ctx->PSSetShader (g_D3D11PixelShader, NULL, 0);
 		ctx->PSSetConstantBuffers(0, 1, &d3d11ConstantBuffer);
+		ctx->PSSetShaderResources(0, (UINT)resourceViews.size(), &resourceViews[0]);
 
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		ctx->Draw(4, 0);
@@ -1332,6 +1381,7 @@ const std::string propTypeStrings[] = {
     "Vector4",
     "Matrix"
 };
+
 
 struct ShaderProp {
     ShaderProp(PropType type_, std::string name_)
@@ -1633,6 +1683,50 @@ UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 	auto prop = propForName(name, Vector4);
 	if (!prop) return;
 	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
+}
+
+UNITY_INTERFACE_EXPORT void SetTexture(const char* name, void* nativeTexturePointer) {
+
+
+#ifdef SUPPORT_D3D
+
+	auto iter = resourceViewIndexes.find(name);
+	if (iter == resourceViewIndexes.end()) {
+		DebugSS("unknown texture " << name);
+		return;
+	}
+
+	auto index = iter->second;
+	assert(index < resourceViews.size());
+	auto resourceView = resourceViews[index];
+	auto resource = (ID3D11Resource*)nativeTexturePointer;
+
+	if (resourceView != nullptr) {
+		ID3D11Resource* existingResource = nullptr;
+		resourceView->GetResource(&existingResource);
+		if (existingResource == resource)
+			return;
+
+		resourceView->Release();
+		resourceView = nullptr;
+	}
+
+	if (resource) {
+
+		HRESULT hr = g_D3D11Device->CreateShaderResourceView(resource, nullptr, &resourceView);
+		if (FAILED(hr)) {
+			DebugHR(hr);
+			resourceView = nullptr;
+		}
+		else {
+			DebugSS("set texture " << name << " in register " << index << " with " << resourceViews.size() << " total resource views");
+		}
+
+	}
+
+	resourceViews[index] = resourceView;
+
+#endif
 }
 
 
