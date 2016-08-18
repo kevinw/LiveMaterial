@@ -81,16 +81,16 @@ static void compileThreadFunc() {
 
 
 static mutex uniformMutex;
-#define GUARD_UNIFORMS lock_guard<mutex> _lock_guard(uniformMutex)
+#define GUARD_UNIFORMS lock_guard<mutex> _lock_guard_uniforms(uniformMutex)
 
 static mutex callbackMutex;
-#define GUARD_CALLBACK lock_guard<mutex> _lock_guard(callbackMutex)
+#define GUARD_CALLBACK lock_guard<mutex> _lock_guard_callbacks(callbackMutex)
 
 static mutex gpuMutex;
-#define GUARD_GPU lock_guard<mutex> _lock_guard(gpuMutex)
+#define GUARD_GPU lock_guard<mutex> _lock_guard_gpu(gpuMutex)
 
 static mutex texturesMutex;
-#define GUARD_TEXTURES lock_guard<mutex> _lock_guard(texturesMutex)
+#define GUARD_TEXTURES lock_guard<mutex> _lock_guard_textures(texturesMutex)
 
 #define NUM_VERTS 6
 
@@ -457,6 +457,22 @@ struct CompileTaskOutput {
 folly::ProducerConsumerQueue<CompileTaskOutput> shaderCompilerOutputs(10);
 HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob);
 
+static void constantBufferReflect(ID3DBlob*);
+
+enum CompileState {
+	NeverCompiled,
+	Compiling,
+	Success,
+	Error
+};
+
+struct Stats {
+	CompileState compileState;
+	uint64_t compileTimeMs;
+	unsigned int instructionCount;	
+};
+
+static Stats stats = {};
 
 void CompileTask::operator()() {
 	const D3D_SHADER_MACRO defines[] = {
@@ -468,16 +484,25 @@ void CompileTask::operator()() {
 
 	ID3DBlob *shaderBlob = nullptr;
 	ID3DBlob *error = nullptr;
-	//StopWatch d3dCompileWatch;
+	StopWatch d3dCompileWatch;
+
+	if (shaderType == Fragment)
+		stats.compileState = CompileState::Compiling;
 	HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error);
 
 	if (FAILED(hr)) {
 		std::string errstr;
 		if (error) errstr = std::string((char*)error->GetBufferPointer(), error->GetBufferSize());
 		DebugSS("Could not compile shader:\n " << errstr);
-		
+		stats.compileState = CompileState::Error;		
 	} else {
 		//DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
+		
+
+		if (shaderType == Fragment) {
+			stats.compileTimeMs = d3dCompileWatch.ElapsedMs();
+			stats.compileState = CompileState::Success;
+		}
 
 		CompileTaskOutput output = { shaderType, shaderBlob };
 		if (!shaderCompilerOutputs.write(output)) {
@@ -803,7 +828,9 @@ static void constantBufferReflect(ID3DBlob* shader) {
 			maxBind = max(maxBind, inputBindDesc.BindPoint);
 		}
 	}
-	
+
+	stats.instructionCount = desc.InstructionCount;
+		
 	{
 		GUARD_TEXTURES;
 		for (size_t i = 0; i < resourceViews.size(); ++i)
@@ -1496,6 +1523,7 @@ static void printUniforms() {
 
 static void submitUniforms() {
 	GUARD_GPU;
+	GUARD_UNIFORMS;
 	if (gpuBuffer && constantBuffer)
 		memcpy(gpuBuffer, constantBuffer, constantBufferSize);
 }
@@ -1807,12 +1835,10 @@ UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) { return hasProp(name)
 UNITY_INTERFACE_EXPORT void Reset() { didInit = false; }
 UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
 UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shaderIncludePath = includePath; }
-
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
-
 UNITY_INTERFACE_EXPORT void SetVerbose(bool verboseEnabled) { verbose = verboseEnabled; }
-
 UNITY_INTERFACE_EXPORT void SubmitUniforms() { submitUniforms(); }
+UNITY_INTERFACE_EXPORT Stats GetStats() { return stats; }
 
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
 #ifdef SUPPORT_D3D
