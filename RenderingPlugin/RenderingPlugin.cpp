@@ -252,6 +252,7 @@ static vector<ID3D11ShaderResourceView*> resourceViews;
 static std::map<string, size_t> resourceViewIndexes;
 #else
 static vector<GLint> textureIDs;
+static vector<GLint> uniformLocs;
 static std::map<string, size_t> textureUnits;
 #endif
 
@@ -1539,6 +1540,7 @@ static void DiscoverGLUniforms(GLuint program) {
   if (!printOpenGLError()) {
       int textureUnit = 0;
       textureUnits.clear();
+      uniformLocs.clear();
 
     for (int i = 0; i < numUniforms; i++) {
       int nameLength = 0;
@@ -1571,17 +1573,10 @@ static void DiscoverGLUniforms(GLuint program) {
                 propType = Matrix;
                 break;
             case GL_SAMPLER_2D: {
-                DebugSS("TEXTURE UNIT " << textureUnit << " IS " << name);
-                textureUnits[name] = textureUnit;
-                textureUnit++;
-                /*
-                textureUnits[name] = textureUnit;
-                DebugSS(name << " glUniform1i(loc=" << glGetUniformLocation(program, name) << ", textureunit=" << textureUnit << ")");
-                glUniform1i(glGetUniformLocation(program, name), textureUnit);
-                printOpenGLError();
-                textureUnit++;
-                 */
-                continue; // CONTINUE IS INTENTIONAL HERE.
+                // assign texture units in the order we see them here
+                textureUnits[name] = textureUnit++;
+                uniformLocs.push_back(glGetUniformLocation(g_Program, name));
+                continue; // don't make a prop
             }
             default:
                 const char* typeName = getGLTypeName(type);
@@ -1635,16 +1630,28 @@ static void updateUniformsGL() {
 
     if (g_Program == 0)
         return;
-
-    /*
-    for (int i = 0; i < textureIDs.size(); ++i) {
-      if (textureIDs[i] > 0) {
-        glActiveTexture(GL_TEXTURE0 + i);
-        glBindTexture(GL_TEXTURE_2D, textureIDs[i]);
+    
+    
+    for (int textureUnit = 0; textureUnit < textureIDs.size(); ++textureUnit) {
+        auto uniformLoc = uniformLocs[textureUnit];
+        auto textureID = textureIDs[textureUnit];
+        if (textureID < 1)
+            continue;
+        
+        glActiveTexture(GL_TEXTURE0 + textureUnit);
         printOpenGLError();
-      }
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        printOpenGLError();
+        glUniform1i(uniformLoc, textureUnit);
+        printOpenGLError();
+
+        int w = 0, h = 0;
+        int miplevel = 0;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_WIDTH, &w);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_HEIGHT, &h);
+        printOpenGLError();
+
     }
-     */
 
     std::stringstream errors;
     
@@ -1740,28 +1747,15 @@ UNITY_INTERFACE_EXPORT void SetTexture(const char* name, void* nativeTexturePoin
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
         if (g_Program) {
+            GUARD_UNIFORMS;
             auto iter = textureUnits.find(name);
             if (iter == textureUnits.end())
                 return;
             
-            auto textureUnit = iter->second;
-            auto uniformLoc = glGetUniformLocation(g_Program, name);
-            
-            glActiveTexture(GL_TEXTURE0 + textureUnit);
-            glEnable(GL_TEXTURE);
-
             auto textureID = (GLint)(size_t)nativeTexturePointer;
-            glBindTexture(GL_TEXTURE_2D, textureID);
+            auto textureUnit = iter->second;
+            textureIDs[textureUnit] = textureID;
             
-            glUniform1i(uniformLoc, textureUnit);
-            printOpenGLError();
-            
-            int w = 0, h = 0;
-            int miplevel = 0;
-            glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_WIDTH, &w);
-            glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_HEIGHT, &h);
-            printOpenGLError();
-
             //DebugSS("set texture unit " << textureUnit << " to textureid " << textureID << " w=" << w << " h=" << h);
         }
     }
