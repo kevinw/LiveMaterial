@@ -1324,8 +1324,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		ctx->Draw(4, 0);
-        
-        if (verbose) INIT_MESSAGE("LiveMaterial is drawing with D3D11");
 		ctx->Release();
 	}
 	#endif
@@ -1369,8 +1367,6 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         printOpenGLError();
-    
-        INIT_MESSAGE("LiveMaterial is drawing with OpenGL ES/Core");
 	}
 	#endif
 }
