@@ -250,6 +250,9 @@ const char* getGLTypeName(GLenum typeEnum) {
 #ifdef SUPPORT_D3D
 static vector<ID3D11ShaderResourceView*> resourceViews;
 static std::map<string, size_t> resourceViewIndexes;
+#else
+static vector<GLint> textureIDs;
+static std::map<string, size_t> textureUnits;
 #endif
 
 
@@ -505,6 +508,9 @@ void ensureConstantBufferSize(size_t size) {
 
 		constantBuffer = new unsigned char[size];
 		gpuBuffer = new unsigned char[size];
+        
+        memset(constantBuffer, 0, size);
+        memset(gpuBuffer, 0, size);
 
 		constantBufferSize = size;
 	}
@@ -1110,8 +1116,8 @@ GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
    if (debugOutPath)
 	     writeTextToFile(debugOutPath, shaderSrc);
     
-   if (verbose)
-      DebugSS("GLSL Version " << (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
+   //if (verbose)
+      //DebugSS("GLSL Version " << (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
     
    glShaderSource(shader, 1, &shaderSrc, NULL);
    glCompileShader(shader);
@@ -1373,7 +1379,7 @@ enum PropType {
     Vector2,
     Vector3,
     Vector4,
-    Matrix
+    Matrix,
 };
 
 const std::string propTypeStrings[] = {
@@ -1381,7 +1387,7 @@ const std::string propTypeStrings[] = {
     "Vector2",
     "Vector3",
     "Vector4",
-    "Matrix"
+    "Matrix",
 };
 
 
@@ -1400,7 +1406,6 @@ struct ShaderProp {
     PropType type;
     const std::string typeString() { return propTypeStrings[(size_t)type]; }
     std::string name;
-
 
 	float value(int n) {
 		if (!constantBuffer || size == 0) return 0.0f;
@@ -1532,38 +1537,75 @@ static void DiscoverGLUniforms(GLuint program) {
   glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &numUniforms);
   int offset = 0;
   if (!printOpenGLError()) {
+      int textureUnit = 0;
+      textureUnits.clear();
+
     for (int i = 0; i < numUniforms; i++) {
       int nameLength = 0;
-      int size = 0;
+      int arraysize = 0;
       GLenum type;
-      glGetActiveUniform(program, i, maxNameLength, &nameLength, &size, &type, name);
-        assert(size == 1);
+      glGetActiveUniform(program, i, maxNameLength, &nameLength, &arraysize, &type, name);
+        assert(arraysize == 1); // number of elems in array
+        int size = 0;
+        PropType propType;
+        
         switch (type) {
-            case GL_FLOAT: size = sizeof(float); break;
-            case GL_FLOAT_VEC2: size = 2 * sizeof(float); break;
-            case GL_FLOAT_VEC3: size = 3 * sizeof(float); break;
-            case GL_FLOAT_VEC4: size = 4 * sizeof(float); break;
-            case GL_FLOAT_MAT4: size = 16 * sizeof(float); break;
+            case GL_FLOAT:
+                size = 1 * sizeof(float);
+                propType = Float;
+                break;
+            case GL_FLOAT_VEC2:
+                size = 2 * sizeof(float);
+                propType = Vector2;
+                break;
+            case GL_FLOAT_VEC3:
+                size = 3 * sizeof(float);
+                propType = Vector3;
+                break;
+            case GL_FLOAT_VEC4:
+                size = 4 * sizeof(float);
+                propType = Vector4;
+                break;
+            case GL_FLOAT_MAT4:
+                size = 16 * sizeof(float);
+                propType = Matrix;
+                break;
+            case GL_SAMPLER_2D: {
+                DebugSS("TEXTURE UNIT " << textureUnit << " IS " << name);
+                textureUnits[name] = textureUnit;
+                textureUnit++;
+                /*
+                textureUnits[name] = textureUnit;
+                DebugSS(name << " glUniform1i(loc=" << glGetUniformLocation(program, name) << ", textureunit=" << textureUnit << ")");
+                glUniform1i(glGetUniformLocation(program, name), textureUnit);
+                printOpenGLError();
+                textureUnit++;
+                 */
+                continue; // CONTINUE IS INTENTIONAL HERE.
+            }
             default:
                 const char* typeName = getGLTypeName(type);
                 if (typeName == nullptr) typeName = "unknown";
                 DebugSS("unknown gl type " << typeName);
-                
-                
                 assert(false);
         }
-      //DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
-      auto prop = propForNameSizeOffset(name, size, offset);
-      prop->uniformIndex = glGetUniformLocation(program, name);
-
+        
+        //DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
+        auto prop = propForName(name, propType);
+        prop->size = size;
+        prop->offset = offset;
+        prop->uniformIndex = glGetUniformLocation(program, name);
 
       printOpenGLError();
       offset += size;
     }
+      
+      textureIDs.clear();
+      for (size_t i = 0; i < textureUnit; ++i)
+          textureIDs.push_back(0);
   }
 
   delete [] name;
-
   ensureConstantBufferSize(offset);
 }
 #endif
@@ -1594,10 +1636,21 @@ static void updateUniformsGL() {
     if (g_Program == 0)
         return;
 
+    /*
+    for (int i = 0; i < textureIDs.size(); ++i) {
+      if (textureIDs[i] > 0) {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, textureIDs[i]);
+        printOpenGLError();
+      }
+    }
+     */
+
     std::stringstream errors;
     
     for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
         auto prop = i->second;
+        
         if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET || prop->uniformIndex == prop->UNIFORM_INVALID) {
             //errors << "invalid shader variable " << prop->name << "\n";
             continue;
@@ -1684,9 +1737,39 @@ UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 
 UNITY_INTERFACE_EXPORT void SetTexture(const char* name, void* nativeTexturePointer) {
 
+#if SUPPORT_OPENGL_UNIFIED
+    if (isOpenGLDevice(s_DeviceType)) {
+        if (g_Program) {
+            auto iter = textureUnits.find(name);
+            if (iter == textureUnits.end())
+                return;
+            
+            auto textureUnit = iter->second;
+            auto uniformLoc = glGetUniformLocation(g_Program, name);
+            
+            glActiveTexture(GL_TEXTURE0 + textureUnit);
+            glEnable(GL_TEXTURE);
+
+            auto textureID = (GLint)(size_t)nativeTexturePointer;
+            glBindTexture(GL_TEXTURE_2D, textureID);
+            
+            glUniform1i(uniformLoc, textureUnit);
+            printOpenGLError();
+            
+            int w = 0, h = 0;
+            int miplevel = 0;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_WIDTH, &w);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_HEIGHT, &h);
+            printOpenGLError();
+
+            //DebugSS("set texture unit " << textureUnit << " to textureid " << textureID << " w=" << w << " h=" << h);
+        }
+    }
+#endif
 
 #ifdef SUPPORT_D3D
-
+if (s_DeviceType == kUnityGfxRendererD3D11) {
+        
 	auto iter = resourceViewIndexes.find(name);
 	if (iter == resourceViewIndexes.end()) {
 		DebugSS("unknown texture " << name);
@@ -1722,6 +1805,7 @@ UNITY_INTERFACE_EXPORT void SetTexture(const char* name, void* nativeTexturePoin
 	}
 
 	resourceViews[index] = resourceView;
+}
 
 #endif
 }
