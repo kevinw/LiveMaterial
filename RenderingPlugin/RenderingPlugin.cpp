@@ -84,10 +84,13 @@ static mutex uniformMutex;
 #define GUARD_UNIFORMS lock_guard<mutex> _lock_guard(uniformMutex)
 
 static mutex callbackMutex;
-#define GUARD_CALLBACK lock_guard<mutex> _lock_guard(callbackMutex);
+#define GUARD_CALLBACK lock_guard<mutex> _lock_guard(callbackMutex)
 
 static mutex gpuMutex;
-#define GUARD_GPU lock_guard<mutex> _lock_guard(gpuMutex);
+#define GUARD_GPU lock_guard<mutex> _lock_guard(gpuMutex)
+
+static mutex texturesMutex;
+#define GUARD_TEXTURES lock_guard<mutex> _lock_guard(texturesMutex)
 
 #define NUM_VERTS 6
 
@@ -250,7 +253,9 @@ const char* getGLTypeName(GLenum typeEnum) {
 #ifdef SUPPORT_D3D
 static vector<ID3D11ShaderResourceView*> resourceViews;
 static std::map<string, size_t> resourceViewIndexes;
-#else
+#endif
+
+#if SUPPORT_OPENGL_UNIFIED
 static vector<GLint> textureIDs;
 static vector<GLint> uniformLocs;
 static std::map<string, size_t> textureUnits;
@@ -798,96 +803,73 @@ static void constantBufferReflect(ID3DBlob* shader) {
 			maxBind = max(maxBind, inputBindDesc.BindPoint);
 		}
 	}
-
-	for (size_t i = 0; i < resourceViews.size(); ++i) {
-		SAFE_RELEASE(resourceViews[i]);
-	}
-	resourceViews.clear();
-	for (UINT i = 0; i < maxBind + 1; ++i) {
-		resourceViews.push_back(nullptr);
-	}
-
-
-	for (UINT i = 0; i < desc.BoundResources; ++i) {
-		D3D11_SHADER_INPUT_BIND_DESC inputBindDesc;
-		if (DX_CHECK(pReflector->GetResourceBindingDesc(i, &inputBindDesc))) {
-			resourceViewIndexes[inputBindDesc.Name] = inputBindDesc.BindPoint;
-			/*
-			DebugSS(
-				"input bind "   << inputBindDesc.Name << " with index " << i << "\n" <<
-				"  BindPoint  " << inputBindDesc.BindPoint << "\n" <<
-				"  Dimension  " << inputBindDesc.Dimension << "\n" <<
-				"  NumSamples " << inputBindDesc.NumSamples << "\n" <<
-				"  ReturnType " << inputBindDesc.ReturnType << "\n" <<
-				"  Type       " << inputBindDesc.Type << "\n" <<
-				"  BindCount  " << inputBindDesc.BindCount << "\n" <<
-				"  uFlags     " << inputBindDesc.uFlags << "\n");
-			*/
+	
+	{
+		GUARD_TEXTURES;
+		for (size_t i = 0; i < resourceViews.size(); ++i)
+			SAFE_RELEASE(resourceViews[i]);
+		resourceViews.clear();
+		for (UINT i = 0; i < maxBind + 1; ++i)
+			resourceViews.push_back(nullptr);
+		for (UINT i = 0; i < desc.BoundResources; ++i) {
+			D3D11_SHADER_INPUT_BIND_DESC inputBindDesc;
+			if (DX_CHECK(pReflector->GetResourceBindingDesc(i, &inputBindDesc)))
+				resourceViewIndexes[inputBindDesc.Name] = inputBindDesc.BindPoint;
 		}
 	}
+
 	
-	std::stringstream fout;
-	if (verbose) fout << "Reflecting Constant Buffers (" << desc.ConstantBuffers << ")\n";
-		
 	// TODO: if we add enough uniforms, do we need to split them into multiple buffers?
 	if (desc.ConstantBuffers >= 2)
 		Debug("WARNING: more than one D3D11 constant buffer, not implemented!");
-
-	SAFE_RELEASE(d3d11ConstantBuffer);
-
-	GUARD_UNIFORMS;
-	clearUniforms();
-	d3d11ConstantBufferSize = 0;	
 	
-	if (desc.ConstantBuffers > 0) {
-		D3D11_SHADER_BUFFER_DESC Description;
-		ID3D11ShaderReflectionConstantBuffer* pConstBuffer = pReflector->GetConstantBufferByIndex(0);
-		pConstBuffer->GetDesc(&Description);
+	{
+		GUARD_UNIFORMS;
+		SAFE_RELEASE(d3d11ConstantBuffer);
+		clearUniforms();
+		d3d11ConstantBufferSize = 0;
 
-		for (UINT j = 0; j < Description.Variables; j++) {
-			ID3D11ShaderReflectionVariable* pVariable = pConstBuffer->GetVariableByIndex(j);
-			D3D11_SHADER_VARIABLE_DESC var_desc;
-			pVariable->GetDesc(&var_desc);
-			if (verbose) {
-				fout << " Name: " << var_desc.Name;
-				fout << " Size: " << var_desc.Size;
-				fout << " Offset: " << var_desc.StartOffset << "\n";
+		if (desc.ConstantBuffers > 0) {
+			D3D11_SHADER_BUFFER_DESC Description;
+			ID3D11ShaderReflectionConstantBuffer* pConstBuffer = pReflector->GetConstantBufferByIndex(0);
+			pConstBuffer->GetDesc(&Description);
+			for (UINT j = 0; j < Description.Variables; j++) {
+				ID3D11ShaderReflectionVariable* pVariable = pConstBuffer->GetVariableByIndex(j);
+				D3D11_SHADER_VARIABLE_DESC var_desc;
+				pVariable->GetDesc(&var_desc);
+
+				// mark the prop's name, size and offset
+				propForNameSizeOffset(var_desc.Name, var_desc.Size, var_desc.StartOffset);
+				d3d11ConstantBufferSize = max(d3d11ConstantBufferSize, var_desc.StartOffset + var_desc.Size);
 			}
 
-			// mark the prop's name, size and offset
-			propForNameSizeOffset(var_desc.Name, var_desc.Size, var_desc.StartOffset);
-			d3d11ConstantBufferSize = max(d3d11ConstantBufferSize, var_desc.StartOffset + var_desc.Size);
-		}
-		
 
-		if (d3d11ConstantBufferSize > 0) {
-			d3d11ConstantBufferSize = roundUp(d3d11ConstantBufferSize, 16);
-			if (verbose) DebugSS("Allocating a constant buffer with size " << d3d11ConstantBufferSize);
+			if (d3d11ConstantBufferSize > 0) {
+				d3d11ConstantBufferSize = roundUp(d3d11ConstantBufferSize, 16);
 
-			// constant buffer
-			D3D11_BUFFER_DESC bufdesc;
-			memset(&bufdesc, 0, sizeof(bufdesc));
-			bufdesc.Usage = D3D11_USAGE_DEFAULT;
-			bufdesc.ByteWidth = d3d11ConstantBufferSize;
-			bufdesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-			bufdesc.CPUAccessFlags = 0;//D3D11_CPU_ACCESS_WRITE;
+				// constant buffer
+				D3D11_BUFFER_DESC bufdesc;
+				memset(&bufdesc, 0, sizeof(bufdesc));
+				bufdesc.Usage = D3D11_USAGE_DEFAULT;
+				bufdesc.ByteWidth = d3d11ConstantBufferSize;
+				bufdesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+				bufdesc.CPUAccessFlags = 0;//D3D11_CPU_ACCESS_WRITE;
 
-			//DebugSS("Creating a constant buffer with byte width " << d3d11ConstantBufferSize);
-
-			HRESULT hr = g_D3D11Device->CreateBuffer(&bufdesc, NULL, &d3d11ConstantBuffer);
-			if (FAILED(hr)) {
-				Debug("ERROR: could not create constant buffer:");
-				DebugHR(hr);
+				HRESULT hr = g_D3D11Device->CreateBuffer(&bufdesc, NULL, &d3d11ConstantBuffer);
+				if (FAILED(hr)) {
+					Debug("ERROR: could not create constant buffer:");
+					DebugHR(hr);
+				}
 			}
 		}
+		ensureConstantBufferSize(d3d11ConstantBufferSize);
+		memset(constantBuffer, 0, d3d11ConstantBufferSize);
 	}
 	
-	if (verbose) Debug(fout.str().c_str());
 
 	pReflector->Release();
 		
-	ensureConstantBufferSize(d3d11ConstantBufferSize);
-	memset(constantBuffer, 0, d3d11ConstantBufferSize);
+
 }
 
 
@@ -1320,7 +1302,10 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		ctx->VSSetShader (g_D3D11VertexShader, NULL, 0);		
 		ctx->PSSetShader (g_D3D11PixelShader, NULL, 0);
 		ctx->PSSetConstantBuffers(0, 1, &d3d11ConstantBuffer);
-		ctx->PSSetShaderResources(0, (UINT)resourceViews.size(), &resourceViews[0]);
+		{
+			GUARD_TEXTURES;
+			ctx->PSSetShaderResources(0, (UINT)resourceViews.size(), &resourceViews[0]);
+		}		
 
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		ctx->Draw(4, 0);
@@ -1759,42 +1744,43 @@ UNITY_INTERFACE_EXPORT void SetTexture(const char* name, void* nativeTexturePoin
 
 #ifdef SUPPORT_D3D
 if (s_DeviceType == kUnityGfxRendererD3D11) {
-        
-	auto iter = resourceViewIndexes.find(name);
-	if (iter == resourceViewIndexes.end()) {
-		DebugSS("unknown texture " << name);
-		return;
-	}
 
-	auto index = iter->second;
-	assert(index < resourceViews.size());
-	auto resourceView = resourceViews[index];
-	auto resource = (ID3D11Resource*)nativeTexturePointer;
+	ID3D11Resource* resourceToRelease = nullptr;
+	{
+		GUARD_TEXTURES;
 
-	if (resourceView != nullptr) {
-		ID3D11Resource* existingResource = nullptr;
-		resourceView->GetResource(&existingResource);
-		if (existingResource == resource)
+		auto iter = resourceViewIndexes.find(name);
+		if (iter == resourceViewIndexes.end())
 			return;
 
-		resourceView->Release();
-		resourceView = nullptr;
-	}
+		auto index = iter->second;
+		assert(index < resourceViews.size());
+		auto resourceView = resourceViews[index];
+		auto resource = (ID3D11Resource*)nativeTexturePointer;
 
-	if (resource) {
+		if (resourceView != nullptr) {
+			ID3D11Resource* existingResource = nullptr;
+			resourceView->GetResource(&existingResource);
+			if (existingResource == resource)
+				return;
 
-		HRESULT hr = g_D3D11Device->CreateShaderResourceView(resource, nullptr, &resourceView);
-		if (FAILED(hr)) {
-			DebugHR(hr);
+			resourceToRelease = resource;
 			resourceView = nullptr;
 		}
-		else {
-			DebugSS("set texture " << name << " in register " << index << " with " << resourceViews.size() << " total resource views");
+
+		if (resource) {
+			HRESULT hr = g_D3D11Device->CreateShaderResourceView(resource, nullptr, &resourceView);
+			if (FAILED(hr)) {
+				Debug("Could not CreateShaderResourceView");
+				DebugHR(hr);
+				resourceView = nullptr;
+			}
 		}
 
+		resourceViews[index] = resourceView;
 	}
 
-	resourceViews[index] = resourceView;
+	SAFE_RELEASE(resourceToRelease);
 }
 
 #endif
