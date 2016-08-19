@@ -50,15 +50,34 @@ static void submitCompileTasks(vector<CompileTask> compileTasks) {
 	}
 }
 
+static void compileThreadFunc();
+
+static void startCompileThread() {
+	compileThread = new std::thread(compileThreadFunc);
+	compileThread->detach();
+}
+
+static bool quitCompileThread = false;
+
+static void terminateCompileThread() {
+	std::unique_lock<mutex> lk(compileMutex);
+	quitCompileThread = true;
+	compileCV.notify_one();
+}
+
 static void compileThreadFunc() {
 	while (true) {
 		{
 			std::unique_lock<mutex> lk(compileMutex);
 			compileCV.wait(lk);
+			if (quitCompileThread) {
+				quitCompileThread = false;
+				compileThread = nullptr;
+				break;
+			}
 		}
 
 		vector<CompileTask> compileTasks;
-
 		bool keepGoing = true;
 		while (keepGoing) {
 			{
@@ -252,6 +271,7 @@ const char* getGLTypeName(GLenum typeEnum) {
 
 #ifdef SUPPORT_D3D
 static vector<ID3D11ShaderResourceView*> resourceViews;
+static vector<std::pair<ID3D11Resource*, size_t> > pendingResources;
 static std::map<string, size_t> resourceViewIndexes;
 #endif
 
@@ -381,28 +401,32 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 	{
 	case kUnityGfxDeviceEventInitialize:
 		{
-			DebugLog("OnGraphicsDeviceEvent(Initialize).\n");
+			Debug("OnGraphicsDeviceEvent(Initialize).");
 			s_DeviceType = s_Graphics->GetRenderer();
 			currentDeviceType = s_DeviceType;
+
+			startCompileThread();
+
 			break;
 		}
 
 	case kUnityGfxDeviceEventShutdown:
 		{
-			DebugLog("OnGraphicsDeviceEvent(Shutdown).\n");
+			Debug("OnGraphicsDeviceEvent(Shutdown).");
 			s_DeviceType = kUnityGfxRendererNull;
+			terminateCompileThread();
 			break;
 		}
 
 	case kUnityGfxDeviceEventBeforeReset:
 		{
-			DebugLog("OnGraphicsDeviceEvent(BeforeReset).\n");
+			Debug("OnGraphicsDeviceEvent(BeforeReset).");
 			break;
 		}
 
 	case kUnityGfxDeviceEventAfterReset:
 		{
-			DebugLog("OnGraphicsDeviceEvent(AfterReset).\n");
+			Debug("OnGraphicsDeviceEvent(AfterReset).");
 			break;
 		}
 	};
@@ -510,8 +534,15 @@ void CompileTask::operator()() {
 		} 
 		else {
 			GUARD_CALLBACK;
-			if (PluginCallbackFunc)
-				PluginCallbackFunc(NeedsSceneViewRepaint);
+			if (PluginCallbackFunc) {
+				try {
+					PluginCallbackFunc(NeedsSceneViewRepaint);
+				}
+				catch (const std::exception& ex) {
+					(void)ex;
+					PluginCallbackFunc = nullptr;
+				}
+			}
 		}
 
 	}
@@ -726,6 +757,12 @@ static bool EnsureD3D11ResourcesAreCreated()
 	return true;
 }
 
+static void clearResourceViews() {
+	for (size_t i = 0; i < resourceViews.size(); ++i)
+		SAFE_RELEASE(resourceViews[i]);
+	resourceViews.clear();
+}
+
 static void ReleaseD3D11Resources() {
 	ID3D11DeviceContext* ctx = NULL;
 	g_D3D11Device->GetImmediateContext(&ctx);
@@ -743,6 +780,7 @@ static void ReleaseD3D11Resources() {
 	SAFE_RELEASE(g_D3D11RasterState);
 	SAFE_RELEASE(g_D3D11BlendState);
 	SAFE_RELEASE(g_D3D11DepthState);
+
 	Debug("... done releasing D3D11Resources.");
 }
 
@@ -753,8 +791,6 @@ static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
 		IUnityGraphicsD3D11* d3d11 = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
 		g_D3D11Device = d3d11->GetDevice();		
 		EnsureD3D11ResourcesAreCreated();
-		compileThread = new std::thread(compileThreadFunc);
-		compileThread->detach();
 	} else if (eventType == kUnityGfxDeviceEventShutdown) {
 		ReleaseD3D11Resources();
 	}
@@ -833,9 +869,7 @@ static void constantBufferReflect(ID3DBlob* shader) {
 		
 	{
 		GUARD_TEXTURES;
-		for (size_t i = 0; i < resourceViews.size(); ++i)
-			SAFE_RELEASE(resourceViews[i]);
-		resourceViews.clear();
+		clearResourceViews();
 		for (UINT i = 0; i < maxBind + 1; ++i)
 			resourceViews.push_back(nullptr);
 		for (UINT i = 0; i < desc.BoundResources; ++i) {
@@ -850,6 +884,7 @@ static void constantBufferReflect(ID3DBlob* shader) {
 	if (desc.ConstantBuffers >= 2)
 		Debug("WARNING: more than one D3D11 constant buffer, not implemented!");
 	
+
 	{
 		GUARD_UNIFORMS;
 		SAFE_RELEASE(d3d11ConstantBuffer);
@@ -1275,6 +1310,8 @@ static void SetDefaultGraphicsState ()
 	#endif
 }
 
+static void setupPendingResourcesD3D11();
+
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
 {
 	// Does actual rendering of a simple triangle
@@ -1321,6 +1358,8 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
+
+		setupPendingResourcesD3D11();
 
 		updateUniformsD3D11(ctx);
 
@@ -1631,6 +1670,37 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, 0, gpuBuffer, 0, 0);
 	}
 }
+
+static void setupPendingResourcesD3D11() {
+	GUARD_TEXTURES;
+
+	for (size_t i = 0; i < pendingResources.size(); ++i) {
+		auto resource = pendingResources[i].first;
+		auto index = pendingResources[i].second;
+
+		auto resourceView = resourceViews[index];
+
+		if (resourceView != nullptr) {
+			SAFE_RELEASE(resourceView);
+			resourceView = nullptr;
+		}
+
+		if (resource) {
+			HRESULT hr = g_D3D11Device->CreateShaderResourceView(resource, nullptr, &resourceView);
+			if (FAILED(hr)) {
+				Debug("Could not CreateShaderResourceView");
+				DebugHR(hr);
+				resourceView = nullptr;
+			}
+		}
+
+		resourceViews[index] = resourceView;
+	}
+
+	pendingResources.clear();
+}
+
+
 #endif
 
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
@@ -1751,7 +1821,42 @@ UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
 }
 
-UNITY_INTERFACE_EXPORT void SetTexture(const char* name, void* nativeTexturePointer) {
+static std::map<int, void*> texturePointers;
+
+void SetTexture(const char* name, void* nativeTexturePointer);
+
+UNITY_INTERFACE_EXPORT bool SetTextureID(const char* name, int id) {
+	void* nativeTexturePointer = nullptr;
+	{
+		GUARD_TEXTURES;
+
+		if (!id) {
+			SetTexture(name, nullptr);
+			return false;
+		}
+
+		auto iter = texturePointers.find(id);
+		if (iter == texturePointers.end())
+			return true; // needs pointer
+
+		nativeTexturePointer = iter->second;
+		assert(nativeTexturePointer);
+	}
+	SetTexture(name, nativeTexturePointer);
+	return false;
+}
+		
+	
+UNITY_INTERFACE_EXPORT void SetTexturePtr(const char* name, int id, void* nativeTexturePointer) {
+	assert(id);
+	assert(texturePointers.find(id) == texturePointers.end());
+	texturePointers[id] = nativeTexturePointer;
+	bool needsSet = SetTextureID(name, id);
+	assert(!needsSet);
+}
+
+static void SetTexture(const char* name, void* nativeTexturePointer) {
+	//DebugSS("SetTexture(" << name << ", " << nativeTexturePointer << ")");
 
 #if SUPPORT_OPENGL_UNIFIED
     if (isOpenGLDevice(s_DeviceType)) {
@@ -1763,52 +1868,26 @@ UNITY_INTERFACE_EXPORT void SetTexture(const char* name, void* nativeTexturePoin
             
             auto textureID = (GLint)(size_t)nativeTexturePointer;
             auto textureUnit = iter->second;
-            textureIDs[textureUnit] = textureID;
+            textureIDs[textureUnit] = textureID;           
             
-            //DebugSS("set texture unit " << textureUnit << " to textureid " << textureID << " w=" << w << " h=" << h);
         }
     }
 #endif
 
 #ifdef SUPPORT_D3D
 if (s_DeviceType == kUnityGfxRendererD3D11) {
+	GUARD_TEXTURES;
 
-	ID3D11Resource* resourceToRelease = nullptr;
-	{
-		GUARD_TEXTURES;
+	auto iter = resourceViewIndexes.find(name);
+	if (iter == resourceViewIndexes.end())
+		return;
 
-		auto iter = resourceViewIndexes.find(name);
-		if (iter == resourceViewIndexes.end())
-			return;
+	auto index = iter->second;
+	assert(index < resourceViews.size());
+	auto resource = (ID3D11Resource*)nativeTexturePointer;
 
-		auto index = iter->second;
-		assert(index < resourceViews.size());
-		auto resourceView = resourceViews[index];
-		auto resource = (ID3D11Resource*)nativeTexturePointer;
+	pendingResources.push_back(std::pair<ID3D11Resource*, size_t>(resource, index));
 
-		if (resourceView != nullptr) {
-			ID3D11Resource* existingResource = nullptr;
-			resourceView->GetResource(&existingResource);
-			if (existingResource == resource)
-				return;
-
-			resourceToRelease = resource;
-			resourceView = nullptr;
-		}
-
-		if (resource) {
-			HRESULT hr = g_D3D11Device->CreateShaderResourceView(resource, nullptr, &resourceView);
-			if (FAILED(hr)) {
-				Debug("Could not CreateShaderResourceView");
-				DebugHR(hr);
-				resourceView = nullptr;
-			}
-		}
-
-		resourceViews[index] = resourceView;
-	}
-
-	SAFE_RELEASE(resourceToRelease);
 }
 
 #endif
