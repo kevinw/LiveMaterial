@@ -1361,7 +1361,8 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 		setupPendingResourcesD3D11();
 
-		updateUniformsD3D11(ctx);
+		if (updateUniforms)
+			updateUniformsD3D11(ctx);
 
 		// set shaders
 		
@@ -1826,14 +1827,14 @@ static std::map<int, void*> texturePointers;
 void SetTexture(const char* name, void* nativeTexturePointer);
 
 UNITY_INTERFACE_EXPORT bool SetTextureID(const char* name, int id) {
+	if (!id) {
+		SetTexture(name, nullptr);
+		return false;
+	}
+	
 	void* nativeTexturePointer = nullptr;
 	{
 		GUARD_TEXTURES;
-
-		if (!id) {
-			SetTexture(name, nullptr);
-			return false;
-		}
 
 		auto iter = texturePointers.find(id);
 		if (iter == texturePointers.end())
