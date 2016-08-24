@@ -404,7 +404,7 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 			s_DeviceType = s_Graphics->GetRenderer();
 			currentDeviceType = s_DeviceType;
 
-#if SUPPORT_D3D
+#ifdef SUPPORT_D3D
 			startCompileThread();
 #endif
 
@@ -416,7 +416,7 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 			Debug("OnGraphicsDeviceEvent(Shutdown).");
 			s_DeviceType = kUnityGfxRendererNull;
             
-#if SUPPORT_D3D
+#ifdef SUPPORT_D3D
 			terminateCompileThread();
 #endif
             
