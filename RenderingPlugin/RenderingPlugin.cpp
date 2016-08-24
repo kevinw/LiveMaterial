@@ -1158,7 +1158,7 @@ static void DoEventGraphicsDeviceD3D12(UnityGfxDeviceEventType eventType)
 #if SUPPORT_OPENGL_UNIFIED
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
 {
-   GLuint shader = glCreateShader ( type );
+   GLuint shader = glCreateShader(type);
    if (shader == 0) {
        Debug("could not create shader object");
    	   return 0;
@@ -1170,6 +1170,9 @@ GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
    //if (verbose)
       //DebugSS("GLSL Version " << (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
     
+
+   if (type == GL_FRAGMENT_SHADER)
+     stats.compileState = CompileState::Compiling;
    glShaderSource(shader, 1, &shaderSrc, NULL);
    glCompileShader(shader);
 
@@ -1179,6 +1182,8 @@ GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
        GLint infoLen = 0;
        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
        Debug("error compiling glsl shader:");
+       if (type == GL_FRAGMENT_SHADER)
+         stats.compileState = CompileState::Error;
        if (infoLen > 1) {
            char* infoLog = (char*)malloc (sizeof(char) * infoLen);
            if (infoLog) {
@@ -1220,8 +1225,10 @@ static void LinkProgram() {
             glDeleteProgram(g_Program);
         
         g_Program = program;
+        stats.compileState = CompileState::Success;
     } else {
         Debug("failure linking program:");
+        stats.compileState = CompileState::Error;
         
         GLint infoLen = 0;
         glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLen);
