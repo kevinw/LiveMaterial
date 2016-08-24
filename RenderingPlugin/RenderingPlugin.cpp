@@ -733,74 +733,7 @@ static ID3D11InputLayout* g_D3D11InputLayout = NULL;
 static ID3D11RasterizerState* g_D3D11RasterState = NULL;
 static ID3D11BlendState* g_D3D11BlendState = NULL;
 static ID3D11DepthStencilState* g_D3D11DepthState = NULL;
-
-static bool EnsureD3D11ResourcesAreCreated()
-{
-	if (g_D3D11BlendState)
-		return true;
-		
-	// render states
-	D3D11_RASTERIZER_DESC rsdesc;
-	memset (&rsdesc, 0, sizeof(rsdesc));
-	rsdesc.FillMode = D3D11_FILL_SOLID;
-	rsdesc.CullMode = D3D11_CULL_NONE;
-	rsdesc.DepthClipEnable = TRUE;
-	g_D3D11Device->CreateRasterizerState (&rsdesc, &g_D3D11RasterState);
-
-	D3D11_DEPTH_STENCIL_DESC dsdesc;
-	memset (&dsdesc, 0, sizeof(dsdesc));
-	dsdesc.DepthEnable = TRUE;
-	dsdesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-	dsdesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-	g_D3D11Device->CreateDepthStencilState (&dsdesc, &g_D3D11DepthState);
-
-	D3D11_BLEND_DESC bdesc;
-	memset (&bdesc, 0, sizeof(bdesc));
-	bdesc.RenderTarget[0].BlendEnable = FALSE;
-	bdesc.RenderTarget[0].RenderTargetWriteMask = 0xF;
-	g_D3D11Device->CreateBlendState (&bdesc, &g_D3D11BlendState);
-
-	return true;
-}
-
-static void clearResourceViews() {
-	for (size_t i = 0; i < resourceViews.size(); ++i)
-		SAFE_RELEASE(resourceViews[i]);
-	resourceViews.clear();
-}
-
-static void ReleaseD3D11Resources() {
-	ID3D11DeviceContext* ctx = NULL;
-	g_D3D11Device->GetImmediateContext(&ctx);
-	ctx->VSSetShader(NULL, NULL, 0);
-	ctx->PSSetShader(NULL, NULL, 0);
-	ctx->PSSetConstantBuffers(0, 0, NULL);
-	ctx->PSSetShaderResources(0, 0, nullptr);
-	ctx->Release();
-
-	Debug("Releasing D3D11Resources...");
-	SAFE_RELEASE(d3d11ConstantBuffer);
-	SAFE_RELEASE(g_D3D11VertexShader);
-	SAFE_RELEASE(g_D3D11PixelShader);
-	SAFE_RELEASE(g_D3D11InputLayout);
-	SAFE_RELEASE(g_D3D11RasterState);
-	SAFE_RELEASE(g_D3D11BlendState);
-	SAFE_RELEASE(g_D3D11DepthState);
-
-	Debug("... done releasing D3D11Resources.");
-}
-
-
-static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
-{
-	if (eventType == kUnityGfxDeviceEventInitialize) {
-		IUnityGraphicsD3D11* d3d11 = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
-		g_D3D11Device = d3d11->GetDevice();		
-		EnsureD3D11ResourcesAreCreated();
-	} else if (eventType == kUnityGfxDeviceEventShutdown) {
-		ReleaseD3D11Resources();
-	}
-}
+static ID3D11SamplerState* g_D3D11SamplerState = NULL;
 
 static string toString(const WCHAR* wbuf) {
 	std::wstring wstr(wbuf);
@@ -821,6 +754,95 @@ static void DebugHR(HRESULT hr) {
 	ss << ": " << toString(buf);
 
 	Debug(ss.str().c_str());
+}
+
+
+static bool DX_CHECK(HRESULT hr) {
+	if (FAILED(hr)) {
+		DebugHR(hr);
+		return false;
+	}
+	else
+		return true;
+}
+
+
+
+static bool EnsureD3D11ResourcesAreCreated()
+{
+	if (g_D3D11BlendState)
+		return true;
+		
+	// render states
+	D3D11_RASTERIZER_DESC rsdesc;
+	memset (&rsdesc, 0, sizeof(rsdesc));
+	rsdesc.FillMode = D3D11_FILL_SOLID;
+	rsdesc.CullMode = D3D11_CULL_NONE;
+	rsdesc.DepthClipEnable = TRUE;
+	g_D3D11Device->CreateRasterizerState (&rsdesc, &g_D3D11RasterState);
+
+	D3D11_DEPTH_STENCIL_DESC dsdesc;
+	memset (&dsdesc, 0, sizeof(dsdesc));
+	dsdesc.DepthEnable = TRUE;
+	dsdesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+	dsdesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+	DX_CHECK(g_D3D11Device->CreateDepthStencilState (&dsdesc, &g_D3D11DepthState));
+
+	D3D11_SAMPLER_DESC samplerDesc;
+	memset(&samplerDesc, 0, sizeof(samplerDesc));
+	samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+	DX_CHECK(g_D3D11Device->CreateSamplerState(&samplerDesc, &g_D3D11SamplerState));
+
+	D3D11_BLEND_DESC bdesc;
+	memset (&bdesc, 0, sizeof(bdesc));
+	bdesc.RenderTarget[0].BlendEnable = FALSE;
+	bdesc.RenderTarget[0].RenderTargetWriteMask = 0xF;
+	DX_CHECK(g_D3D11Device->CreateBlendState (&bdesc, &g_D3D11BlendState));
+
+	return true;
+}
+
+static void clearResourceViews() {
+	for (size_t i = 0; i < resourceViews.size(); ++i)
+		SAFE_RELEASE(resourceViews[i]);
+	resourceViews.clear();
+}
+
+static void ReleaseD3D11Resources() {
+	ID3D11DeviceContext* ctx = NULL;
+	g_D3D11Device->GetImmediateContext(&ctx);
+	ctx->VSSetShader(NULL, NULL, 0);
+	ctx->PSSetShader(NULL, NULL, 0);
+	ctx->PSSetConstantBuffers(0, 0, NULL);
+	ctx->PSSetShaderResources(0, 0, nullptr);
+	ctx->PSSetSamplers(0, 0, nullptr);
+	ctx->Release();
+
+	Debug("Releasing D3D11Resources...");
+	SAFE_RELEASE(d3d11ConstantBuffer);
+	SAFE_RELEASE(g_D3D11VertexShader);
+	SAFE_RELEASE(g_D3D11PixelShader);
+	SAFE_RELEASE(g_D3D11InputLayout);
+	SAFE_RELEASE(g_D3D11RasterState);
+	SAFE_RELEASE(g_D3D11BlendState);
+	SAFE_RELEASE(g_D3D11DepthState);
+	SAFE_RELEASE(g_D3D11SamplerState);
+	Debug("... done releasing D3D11Resources.");
+}
+
+
+static void DoEventGraphicsDeviceD3D11(UnityGfxDeviceEventType eventType)
+{
+	if (eventType == kUnityGfxDeviceEventInitialize) {
+		IUnityGraphicsD3D11* d3d11 = s_UnityInterfaces->Get<IUnityGraphicsD3D11>();
+		g_D3D11Device = d3d11->GetDevice();		
+		EnsureD3D11ResourcesAreCreated();
+	} else if (eventType == kUnityGfxDeviceEventShutdown) {
+		ReleaseD3D11Resources();
+	}
 }
 
 static int roundUp(int numToRound, int multiple) {
@@ -846,14 +868,6 @@ static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
 	return reflector;
 }
 
-bool DX_CHECK(HRESULT hr) {
-	if (FAILED(hr)) {
-		DebugHR(hr);
-		return false;
-	} else
-		return true;
-}
-
 static void constantBufferReflect(ID3DBlob* shader) {	
 	assert(g_D3D11Device);
 	auto pReflector = shaderReflector(shader);
@@ -872,7 +886,7 @@ static void constantBufferReflect(ID3DBlob* shader) {
 	}
 
 	stats.instructionCount = desc.InstructionCount;
-		
+
 	{
 		GUARD_TEXTURES;
 		clearResourceViews();
@@ -880,17 +894,16 @@ static void constantBufferReflect(ID3DBlob* shader) {
 			resourceViews.push_back(nullptr);
 		for (UINT i = 0; i < desc.BoundResources; ++i) {
 			D3D11_SHADER_INPUT_BIND_DESC inputBindDesc;
-			if (DX_CHECK(pReflector->GetResourceBindingDesc(i, &inputBindDesc)))
+			if (DX_CHECK(pReflector->GetResourceBindingDesc(i, &inputBindDesc))) {
 				resourceViewIndexes[inputBindDesc.Name] = inputBindDesc.BindPoint;
+			}
 		}
 	}
-
-	
+		
 	// TODO: if we add enough uniforms, do we need to split them into multiple buffers?
 	if (desc.ConstantBuffers >= 2)
 		Debug("WARNING: more than one D3D11 constant buffer, not implemented!");
 	
-
 	{
 		GUARD_UNIFORMS;
 		SAFE_RELEASE(d3d11ConstantBuffer);
@@ -1385,7 +1398,15 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		{
 			GUARD_TEXTURES;
 			ctx->PSSetShaderResources(0, (UINT)resourceViews.size(), &resourceViews[0]);
-		}		
+
+			// TODO: is the number of samplers equal to the number of resource views? no idea
+			vector<ID3D11SamplerState*> samplers;
+			assert(g_D3D11SamplerState);
+			const UINT numSamplers = (UINT)resourceViews.size();
+			for (UINT i = 0; i < numSamplers; ++i)
+				samplers.push_back(g_D3D11SamplerState);
+			ctx->PSSetSamplers(0, numSamplers, &samplers[0]);
+		}
 
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		ctx->Draw(4, 0);
@@ -1706,6 +1727,8 @@ static void setupPendingResourcesD3D11() {
 				DebugHR(hr);
 				resourceView = nullptr;
 			}
+
+			SAFE_RELEASE(resource);
 		}
 
 		resourceViews[index] = resourceView;
@@ -1899,6 +1922,7 @@ if (s_DeviceType == kUnityGfxRendererD3D11) {
 	auto index = iter->second;
 	assert(index < resourceViews.size());
 	auto resource = (ID3D11Resource*)nativeTexturePointer;
+	resource->AddRef();
 
 	pendingResources.push_back(std::pair<ID3D11Resource*, size_t>(resource, index));
 
