@@ -36,8 +36,6 @@ static vector<CompileTask> pendingCompileTasks;
 
 #ifdef SUPPORT_D3D
 static std::thread* compileThread;
-#endif
-
 
 
 static void submitCompileTasks(vector<CompileTask> compileTasks) {
@@ -98,6 +96,7 @@ static void compileThreadFunc() {
 	}
 }
 
+#endif
 
 static mutex uniformMutex;
 #define GUARD_UNIFORMS lock_guard<mutex> _lock_guard_uniforms(uniformMutex)
@@ -405,7 +404,9 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 			s_DeviceType = s_Graphics->GetRenderer();
 			currentDeviceType = s_DeviceType;
 
+#if SUPPORT_D3D
 			startCompileThread();
+#endif
 
 			break;
 		}
@@ -414,7 +415,11 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 		{
 			Debug("OnGraphicsDeviceEvent(Shutdown).");
 			s_DeviceType = kUnityGfxRendererNull;
+            
+#if SUPPORT_D3D
 			terminateCompileThread();
+#endif
+            
 			break;
 		}
 
@@ -470,6 +475,21 @@ static GLuint	g_Program = 0;
 
 static void LinkProgram();
 
+enum CompileState {
+    NeverCompiled,
+    Compiling,
+    Success,
+    Error
+};
+
+struct Stats {
+    CompileState compileState;
+    uint64_t compileTimeMs;
+    unsigned int instructionCount;
+};
+
+static Stats stats = {};
+
 #if SUPPORT_D3D11
 
 
@@ -483,20 +503,6 @@ HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR ent
 
 static void constantBufferReflect(ID3DBlob*);
 
-enum CompileState {
-	NeverCompiled,
-	Compiling,
-	Success,
-	Error
-};
-
-struct Stats {
-	CompileState compileState;
-	uint64_t compileTimeMs;
-	unsigned int instructionCount;	
-};
-
-static Stats stats = {};
 
 void CompileTask::operator()() {
 	const D3D_SHADER_MACRO defines[] = {
@@ -1824,7 +1830,7 @@ UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 
 static std::map<int, void*> texturePointers;
 
-void SetTexture(const char* name, void* nativeTexturePointer);
+static void SetTexture(const char* name, void* nativeTexturePointer);
 
 UNITY_INTERFACE_EXPORT bool SetTextureID(const char* name, int id) {
 	if (!id) {
