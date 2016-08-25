@@ -16,7 +16,8 @@ HRESULT CompileShader(
 	_In_ LPCSTR profile,
 	const D3D_SHADER_MACRO defines[],
 	_Outptr_ ID3DBlob** blob,
-	_Outptr_ ID3DBlob** errorBlob)
+	_Outptr_ ID3DBlob** errorBlob,
+	UINT flags)
 {
 	if (!src || !srcName || !entryPoint || !profile || !blob)
 		return E_INVALIDARG;
@@ -24,10 +25,6 @@ HRESULT CompileShader(
 	*blob = nullptr;
 	*errorBlob = nullptr;
 
-	UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;// D3DCOMPILE_ENABLE_STRICTNESS;
-//#if defined( DEBUG ) || defined( _DEBUG )
-//	flags |= D3DCOMPILE_DEBUG;
-//#endif
 
 	ID3DBlob* shaderBlob = nullptr;
 	

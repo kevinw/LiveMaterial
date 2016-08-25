@@ -34,6 +34,9 @@ static mutex compileMutex;
 static std::condition_variable compileCV;
 static vector<CompileTask> pendingCompileTasks;
 
+static bool shaderDebugging = false;
+static int numUniformChanges = 0;
+
 #ifdef SUPPORT_D3D
 static std::thread* compileThread;
 
@@ -499,7 +502,7 @@ struct CompileTaskOutput {
 };
 
 folly::ProducerConsumerQueue<CompileTaskOutput> shaderCompilerOutputs(10);
-HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob);
+HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob, UINT flags);
 
 static void constantBufferReflect(ID3DBlob*);
 
@@ -518,7 +521,16 @@ void CompileTask::operator()() {
 
 	if (shaderType == Fragment)
 		stats.compileState = CompileState::Compiling;
-	HRESULT hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error);
+
+	UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
+
+
+	if (shaderDebugging) {
+		Debug("Compiling shader with D3DCOMPILE_DEBUG");
+		flags |= D3DCOMPILE_DEBUG;
+	}
+
+	auto hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error, flags);
 
 	if (FAILED(hr)) {
 		std::string errstr;
@@ -526,9 +538,6 @@ void CompileTask::operator()() {
 		DebugSS("Could not compile shader:\n " << errstr);
 		stats.compileState = CompileState::Error;		
 	} else {
-		//DebugSS("background D3DCompile took " << d3dCompileWatch.ElapsedMs() << "ms");
-		
-
 		if (shaderType == Fragment) {
 			stats.compileTimeMs = d3dCompileWatch.ElapsedMs();
 			stats.compileState = CompileState::Success;
@@ -1336,7 +1345,7 @@ static void SetDefaultGraphicsState ()
 	#endif
 }
 
-static void setupPendingResourcesD3D11();
+static void setupPendingResourcesD3D11(ID3D11DeviceContext* ctx);
 
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
 {
@@ -1384,30 +1393,12 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 
 		ID3D11DeviceContext* ctx = NULL;
 		g_D3D11Device->GetImmediateContext (&ctx);
-
-		setupPendingResourcesD3D11();
-
+		setupPendingResourcesD3D11(ctx);
 		if (updateUniforms)
-			updateUniformsD3D11(ctx);
-
-		// set shaders
-		
+			updateUniformsD3D11(ctx);	
 		ctx->VSSetShader (g_D3D11VertexShader, NULL, 0);		
 		ctx->PSSetShader (g_D3D11PixelShader, NULL, 0);
 		ctx->PSSetConstantBuffers(0, 1, &d3d11ConstantBuffer);
-		{
-			GUARD_TEXTURES;
-			ctx->PSSetShaderResources(0, (UINT)resourceViews.size(), &resourceViews[0]);
-
-			// TODO: is the number of samplers equal to the number of resource views? no idea
-			vector<ID3D11SamplerState*> samplers;
-			assert(g_D3D11SamplerState);
-			const UINT numSamplers = (UINT)resourceViews.size();
-			for (UINT i = 0; i < numSamplers; ++i)
-				samplers.push_back(g_D3D11SamplerState);
-			ctx->PSSetSamplers(0, numSamplers, &samplers[0]);
-		}
-
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		ctx->Draw(4, 0);
 		ctx->Release();
@@ -1598,8 +1589,10 @@ static void printUniforms() {
 static void submitUniforms() {
 	GUARD_GPU;
 	GUARD_UNIFORMS;
-	if (gpuBuffer && constantBuffer)
+	if (gpuBuffer && constantBuffer && numUniformChanges > 0) {
+		numUniformChanges = 0;
 		memcpy(gpuBuffer, constantBuffer, constantBufferSize);
+	}
 }
 
 static void clearUniforms() {
@@ -1706,7 +1699,7 @@ static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
 	}
 }
 
-static void setupPendingResourcesD3D11() {
+static void setupPendingResourcesD3D11(ID3D11DeviceContext* ctx) {
 	GUARD_TEXTURES;
 
 	for (size_t i = 0; i < pendingResources.size(); ++i) {
@@ -1735,6 +1728,17 @@ static void setupPendingResourcesD3D11() {
 	}
 
 	pendingResources.clear();
+
+
+	ctx->PSSetShaderResources(0, (UINT)resourceViews.size(), &resourceViews[0]);
+
+	// TODO: is the number of samplers equal to the number of resource views? no idea
+	vector<ID3D11SamplerState*> samplers;
+	assert(g_D3D11SamplerState);
+	const UINT numSamplers = (UINT)resourceViews.size();
+	for (UINT i = 0; i < numSamplers; ++i)
+		samplers.push_back(g_D3D11SamplerState);
+	ctx->PSSetSamplers(0, numSamplers, &samplers[0]);
 }
 
 
@@ -1830,6 +1834,7 @@ UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
 	if (!constantBuffer) return;
     auto prop = propForName(name, Vector4);
 	if (!prop) return;
+	numUniformChanges++;
 	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
 }
 
@@ -1839,6 +1844,7 @@ UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
 	if (!constantBuffer) return;
     auto prop = propForName(name, Float);
 	if (!prop) return;
+	numUniformChanges++;
 	memcpy(constantBuffer + prop->offset, &value, sizeof(float) * 1);
 }
 
@@ -1847,6 +1853,7 @@ UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
 	if (!constantBuffer) return;
     auto prop = propForName(name, Matrix);
 	if (!prop) return;
+	numUniformChanges++;
 	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 16);
 }
     
@@ -1855,6 +1862,7 @@ UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
 	if (!constantBuffer) return;
 	auto prop = propForName(name, Vector4);
 	if (!prop) return;
+	numUniformChanges++;
 	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
 }
 
@@ -1954,6 +1962,7 @@ UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
 UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shaderIncludePath = includePath; }
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 UNITY_INTERFACE_EXPORT void SetVerbose(bool verboseEnabled) { verbose = verboseEnabled; }
+UNITY_INTERFACE_EXPORT void SetShaderDebugging(bool shaderDebuggingEnabled) { shaderDebugging = shaderDebuggingEnabled;  }
 UNITY_INTERFACE_EXPORT void SubmitUniforms() { submitUniforms(); }
 UNITY_INTERFACE_EXPORT Stats GetStats() { return stats; }
 
