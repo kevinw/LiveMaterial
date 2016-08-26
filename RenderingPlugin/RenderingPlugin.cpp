@@ -1345,7 +1345,9 @@ static void SetDefaultGraphicsState ()
 	#endif
 }
 
+#if SUPPORT_D3D11
 static void setupPendingResourcesD3D11(ID3D11DeviceContext* ctx);
+#endif
 
 static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
 {
