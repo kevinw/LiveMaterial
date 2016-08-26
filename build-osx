@@ -1,0 +1,5 @@
+#!/bin/bash -e
+
+scriptdir=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+cd "$scriptdir/RenderingPlugin/Xcode3"
+xcodebuild
