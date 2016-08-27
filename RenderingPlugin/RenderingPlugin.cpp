@@ -35,6 +35,7 @@ static std::condition_variable compileCV;
 static vector<CompileTask> pendingCompileTasks;
 
 static bool shaderDebugging = false;
+static int optimizationLevel = 3;
 static int numUniformChanges = 0;
 
 #ifdef SUPPORT_D3D
@@ -522,8 +523,13 @@ void CompileTask::operator()() {
 	if (shaderType == Fragment)
 		stats.compileState = CompileState::Compiling;
 
-	UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
+	UINT flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
 
+  if (optimizationLevel == 0) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL0;
+  if (optimizationLevel == 1) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL1;
+  if (optimizationLevel == 2) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL2;
+  if (optimizationLevel == 3) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+  else DebugSS("Unknown optimization level " << optimizationLevel);
 
 	if (shaderDebugging) {
 		Debug("Compiling shader with D3DCOMPILE_DEBUG");
@@ -1661,6 +1667,7 @@ static void DiscoverGLUniforms(GLuint program) {
                 if (typeName == nullptr) typeName = "unknown";
                 DebugSS("unknown gl type " << typeName);
                 assert(false);
+                continue;
         }
         
         //DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
@@ -1964,6 +1971,7 @@ UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
 UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shaderIncludePath = includePath; }
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 UNITY_INTERFACE_EXPORT void SetVerbose(bool verboseEnabled) { verbose = verboseEnabled; }
+UNITY_INTERFACE_EXPORT void SetOptimizationLevel(int level) { optimizationLevel = level; }
 UNITY_INTERFACE_EXPORT void SetShaderDebugging(bool shaderDebuggingEnabled) { shaderDebugging = shaderDebuggingEnabled;  }
 UNITY_INTERFACE_EXPORT void SubmitUniforms() { submitUniforms(); }
 UNITY_INTERFACE_EXPORT Stats GetStats() { return stats; }
