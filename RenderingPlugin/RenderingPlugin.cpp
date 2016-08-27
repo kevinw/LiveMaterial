@@ -1464,6 +1464,21 @@ enum PropType {
     Matrix,
 };
 
+static int numElemsForPropType(PropType type) {
+    switch (type) {
+        case PropType::Float: return 1;
+        case PropType::Vector4: return 4;
+        case PropType::Vector3: return 3;
+        case PropType::Vector2: return 2;
+        case PropType::Matrix: return 16;
+        default: {
+            assert(false);
+            Debug("Unknown proptype");
+        }
+    }
+
+}
+
 const std::string propTypeStrings[] = {
     "Float",
     "Vector2",
@@ -1483,11 +1498,14 @@ struct ShaderProp {
 #endif
 		offset = 0;
 		size = 0;
+        arraySize = 0;
     }
     
     PropType type;
     const std::string typeString() { return propTypeStrings[(size_t)type]; }
     std::string name;
+
+  float* floatBufferPointer() { return (float*)(constantBuffer + offset); }
 
 	float value(int n) {
 		if (!constantBuffer || size == 0) return 0.0f;
@@ -1502,6 +1520,7 @@ struct ShaderProp {
 
 	uint16_t offset;
 	uint16_t size;
+    uint16_t arraySize;
 
 	static PropType typeForSize(uint16_t size) {
 		switch (size) {
@@ -1631,29 +1650,37 @@ static void DiscoverGLUniforms(GLuint program) {
       int arraysize = 0;
       GLenum type;
       glGetActiveUniform(program, i, maxNameLength, &nameLength, &arraysize, &type, name);
-        assert(arraysize == 1); // number of elems in array
+        if (arraysize > 1) {
+            string namestr(name);
+            size_t s = namestr.size();
+            if (s > 3 && namestr[s-1] == ']' && namestr[s-2] == '0' && namestr[s-3] == '[') {
+                namestr.resize(s - 3);
+                strncpy(name, namestr.c_str(), s - 3);
+            }
+        }
+      assert(arraysize > 0);
         int size = 0;
         PropType propType;
         
         switch (type) {
             case GL_FLOAT:
-                size = 1 * sizeof(float);
+                size = 1 * sizeof(float) * arraysize;
                 propType = Float;
                 break;
             case GL_FLOAT_VEC2:
-                size = 2 * sizeof(float);
+                size = 2 * sizeof(float) * arraysize;
                 propType = Vector2;
                 break;
             case GL_FLOAT_VEC3:
-                size = 3 * sizeof(float);
+                size = 3 * sizeof(float) * arraysize;
                 propType = Vector3;
                 break;
             case GL_FLOAT_VEC4:
-                size = 4 * sizeof(float);
+                size = 4 * sizeof(float) * arraysize;
                 propType = Vector4;
                 break;
             case GL_FLOAT_MAT4:
-                size = 16 * sizeof(float);
+                size = 16 * sizeof(float) * arraysize;
                 propType = Matrix;
                 break;
             case GL_SAMPLER_2D: {
@@ -1672,6 +1699,7 @@ static void DiscoverGLUniforms(GLuint program) {
         
         //DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
         auto prop = propForName(name, propType);
+        prop->arraySize = arraysize;
         prop->size = size;
         prop->offset = offset;
         prop->uniformIndex = glGetUniformLocation(program, name);
@@ -1794,15 +1822,19 @@ static void updateUniformsGL() {
 		switch (prop->type) {
 		case Float:
 			glUniform1f(prop->uniformIndex, prop->value(0));
+			//glUniform1fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Vector2:
 			glUniform2f(prop->uniformIndex, prop->value(0), prop->value(1));
+			//glUniform2fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Vector3:
             glUniform3f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2));
+      //glUniform3fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Vector4:
 			glUniform4f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2), prop->value(3));
+			//glUniform4fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Matrix: {
 			const int numElements = 1;
@@ -1838,41 +1870,60 @@ UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
 
 UNITY_INTERFACE_EXPORT void ClearDebugFunction() { _DebugFunc = nullptr; }
 
-UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
-	GUARD_UNIFORMS;	
-	if (!constantBuffer) return;
-    auto prop = propForName(name, Vector4);
-	if (!prop) return;
-	numUniformChanges++;
-	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
+    
+static void setproparray(const char* name, PropType type, const char* methodName, float* value, int numFloats) {
+    GUARD_UNIFORMS;
+
+    if (!constantBuffer)
+        return;
+
+    auto prop = propForName(name, type);
+    if (!prop) {
+      if (verbose) DebugSS("no prop named " << name);
+      return;
+    }
+    
+    int numElems = numElemsForPropType(type);
+    
+    numUniformChanges++;
+    
+    if (numFloats < prop->arraySize * numElems) {
+        DebugSS("not enough elements in " << methodName << " array (expected " << (prop->arraySize * numElems) << " but got " << numFloats << ")");
+    } else {
+        size_t bytesToCopy = std::min(sizeof(float) * numFloats, sizeof(float) * numElems * prop->arraySize);
+        memcpy(constantBuffer + prop->offset, value, bytesToCopy);
+    }
+}
+
+UNITY_INTERFACE_EXPORT void SetFloatArray(const char* name, float* value, int numFloats) {
+    setproparray(name, PropType::Float, __func__, value, numFloats);
+}
+    
+UNITY_INTERFACE_EXPORT void SetMatrixArray(const char* name, float* value, int numFloats) {
+    setproparray(name, PropType::Matrix, __func__, value, numFloats);
+}
+    
+UNITY_INTERFACE_EXPORT void SetVectorArray(const char* name, float* value, int numFloats) {
+    setproparray(name, PropType::Vector4, __func__, value, numFloats);
 }
 
 
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
-	GUARD_UNIFORMS;
-	if (!constantBuffer) return;
-    auto prop = propForName(name, Float);
-	if (!prop) return;
-	numUniformChanges++;
-	memcpy(constantBuffer + prop->offset, &value, sizeof(float) * 1);
+    setproparray(name, PropType::Float, __func__, &value, 1);
 }
+    
 
 UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
-	GUARD_UNIFORMS;
-	if (!constantBuffer) return;
-    auto prop = propForName(name, Matrix);
-	if (!prop) return;
-	numUniformChanges++;
-	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 16);
+    setproparray(name, PropType::Matrix, __func__, value, 16);
 }
     
 UNITY_INTERFACE_EXPORT void SetColor(const char* name, float* value) {
-	GUARD_UNIFORMS;
-	if (!constantBuffer) return;
-	auto prop = propForName(name, Vector4);
-	if (!prop) return;
-	numUniformChanges++;
-	memcpy(constantBuffer + prop->offset, value, sizeof(float) * 4);
+    setproparray(name, PropType::Vector4, __func__, value, 4);
+}
+    
+
+UNITY_INTERFACE_EXPORT void SetVector4(const char* name, float* value) {
+    setproparray(name, PropType::Vector4, __func__, value, 4);
 }
 
 static std::map<int, void*> texturePointers;
