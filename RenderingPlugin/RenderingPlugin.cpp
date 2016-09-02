@@ -23,6 +23,7 @@
 #include <map>
 
 using std::string;
+using std::endl;
 using std::mutex;
 using std::lock_guard;
 using std::vector;
@@ -1798,7 +1799,7 @@ static void updateUniformsGL() {
         glActiveTexture(GL_TEXTURE0 + textureUnit);
         printOpenGLError();
         glBindTexture(GL_TEXTURE_2D, textureID);
-        printOpenGLError();
+        if (printOpenGLError()) { DebugSS("Error binding texture with id " << textureID); }
         glUniform1i(uniformLoc, textureUnit);
         printOpenGLError();
 
@@ -2019,6 +2020,49 @@ UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
 UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) { return hasProp(name); }
 UNITY_INTERFACE_EXPORT void Reset() { didInit = false; }
 UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
+UNITY_INTERFACE_EXPORT void DumpUniformsToFile(const char* filename) {
+  GUARD_UNIFORMS;
+    std::ofstream js(filename);
+    js << "{" << endl;
+
+    for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
+        auto prop = i->second;
+
+        js << "    \"" << prop->name << "\": ";
+
+        switch (prop->type) {
+            case Float:
+                js << prop->value(0); break;
+            case Vector2:
+                js << "[" << prop->value(0) << ", " << prop->value(1) << "]"; break;
+            case Vector3:
+                js << "[" << prop->value(0) << ", " << prop->value(1) << ", " << prop->value(2) << "]"; break;
+            case Vector4:
+                js << "[" << prop->value(0) << ", " << prop->value(1) << ", " << prop->value(2) << ", " << prop->value(3) << "]"; break;
+            case Matrix:
+                js << "[";
+                for (int i = 0; i < 16; ++i) {
+                  js << prop->value(i);
+                  if (i != 15)
+                    js << ", ";
+                }
+                js << "]";
+                break;
+            default:
+                assert(false);
+        }
+
+        auto nexti = i;
+        nexti++;
+        if (nexti != shaderProps.end())
+          js << ",";
+
+        js << "\n";
+    }
+
+    js << "}";
+}
+
 UNITY_INTERFACE_EXPORT void SetShaderIncludePath(const char* includePath) { shaderIncludePath = includePath; }
 UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = update; }
 UNITY_INTERFACE_EXPORT void SetVerbose(bool verboseEnabled) { verbose = verboseEnabled; }
@@ -2026,8 +2070,9 @@ UNITY_INTERFACE_EXPORT void SetOptimizationLevel(int level) { optimizationLevel 
 UNITY_INTERFACE_EXPORT void SetShaderDebugging(bool shaderDebuggingEnabled) { shaderDebugging = shaderDebuggingEnabled;  }
 UNITY_INTERFACE_EXPORT void SubmitUniforms() { submitUniforms(); }
 UNITY_INTERFACE_EXPORT Stats GetStats() { return stats; }
-
+UNITY_INTERFACE_EXPORT void SetStats(Stats newStats) { stats = newStats; }
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
+
 #ifdef SUPPORT_D3D
 	if (s_DeviceType == kUnityGfxRendererD3D11) {
 		vector<CompileTask> compileTasks;
