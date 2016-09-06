@@ -148,26 +148,8 @@ ENDLOCAL
       </ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>SETLOCAL
-
-if "$(PlatformShortName)" == "x86" (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86
-) else (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86_64
-)
-
-set TARGET_SHADER_PATH=$(SolutionDir)..\..\UnityProject\Assets\StreamingAssets\Shaders\DX11_9_1\
-
-echo Target Plugin Path is %TARGET_PLUGIN_PATH%
-echo Target Shader Path is %TARGET_SHADER_PATH%
-
-copy /Y "$(TargetPath)" "%TARGET_PLUGIN_PATH%\$(TargetFileName)"
-copy /Y "$(TargetDir)SimpleVertexShader.cso" "%TARGET_SHADER_PATH%SimpleVertexShader.cso"
-copy /Y "$(TargetDir)SimplePixelShader.cso" "%TARGET_SHADER_PATH%SimplePixelShader.cso"
-
-
-ENDLOCAL
-</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
     <CustomBuildStep>
       <Command>echo "COPYING" &amp; copy "$(TargetPath)" "d:\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "d:\src\raymarching\Assets\Plugins\x86_64\"</Command>
@@ -247,26 +229,8 @@ ENDLOCAL
       </ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>SETLOCAL
-
-if "$(PlatformShortName)" == "x86" (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86
-) else (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86_64
-)
-
-set TARGET_SHADER_PATH=$(SolutionDir)..\..\UnityProject\Assets\StreamingAssets\Shaders\DX11_9_1\
-
-echo Target Plugin Path is %TARGET_PLUGIN_PATH%
-echo Target Shader Path is %TARGET_SHADER_PATH%
-
-copy /Y "$(TargetPath)" "%TARGET_PLUGIN_PATH%\$(TargetFileName)"
-copy /Y "$(TargetDir)SimpleVertexShader.cso" "%TARGET_SHADER_PATH%SimpleVertexShader.cso"
-copy /Y "$(TargetDir)SimplePixelShader.cso" "%TARGET_SHADER_PATH%SimplePixelShader.cso"
-
-
-ENDLOCAL
-</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
     <CustomBuildStep>
       <Command>echo "COPYING" &amp; copy "$(TargetPath)" "d:\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "d:\src\raymarching\Assets\Plugins\x86_64\"</Command>
