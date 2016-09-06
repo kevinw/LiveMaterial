@@ -526,11 +526,13 @@ void CompileTask::operator()() {
 
 	UINT flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
 
-  if (optimizationLevel == 0) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL0;
+  /*if (optimizationLevel == 0) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL0;
   if (optimizationLevel == 1) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL1;
   if (optimizationLevel == 2) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL2;
   if (optimizationLevel == 3) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
   else DebugSS("Unknown optimization level " << optimizationLevel);
+  */
+	flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
 
 	if (shaderDebugging) {
 		Debug("Compiling shader with D3DCOMPILE_DEBUG");
@@ -934,6 +936,7 @@ static void constantBufferReflect(ID3DBlob* shader) {
 				ID3D11ShaderReflectionVariable* pVariable = pConstBuffer->GetVariableByIndex(j);
 				D3D11_SHADER_VARIABLE_DESC var_desc;
 				pVariable->GetDesc(&var_desc);
+
 
 				// mark the prop's name, size and offset
 				propForNameSizeOffset(var_desc.Name, var_desc.Size, var_desc.StartOffset);
@@ -1500,7 +1503,12 @@ struct ShaderProp {
 		offset = 0;
 		size = 0;
         arraySize = 0;
+
+#ifdef SUPPORT_D3D
+		arraySize = 1;
+#endif
     }
+
     
     PropType type;
     const std::string typeString() { return propTypeStrings[(size_t)type]; }
@@ -1613,6 +1621,7 @@ static void printUniforms() {
     std::string s(ss.str());
     Debug(s.c_str());
 }
+
 
 static void submitUniforms() {
 	GUARD_GPU;
@@ -1891,7 +1900,7 @@ static void setproparray(const char* name, PropType type, const char* methodName
     if (numFloats < prop->arraySize * numElems) {
         DebugSS("not enough elements in " << methodName << " array (expected " << (prop->arraySize * numElems) << " but got " << numFloats << ")");
     } else {
-        size_t bytesToCopy = std::min(sizeof(float) * numFloats, sizeof(float) * numElems * prop->arraySize);
+        size_t bytesToCopy = min(sizeof(float) * numFloats, sizeof(float) * numElems * prop->arraySize);
         memcpy(constantBuffer + prop->offset, value, bytesToCopy);
     }
 }
