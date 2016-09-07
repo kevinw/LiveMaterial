@@ -1908,7 +1908,7 @@ static void setproparray(const char* name, PropType type, const char* methodName
     if (numFloats < prop->arraySize * numElems) {
         DebugSS("not enough elements in " << methodName << " array (expected " << (prop->arraySize * numElems) << " but got " << numFloats << ")");
     } else {
-        size_t bytesToCopy = min(sizeof(float) * numFloats, sizeof(float) * numElems * prop->arraySize);
+        size_t bytesToCopy = fmin(sizeof(float) * numFloats, sizeof(float) * numElems * prop->arraySize);
         memcpy(constantBuffer + prop->offset, value, bytesToCopy);
     }
 }
