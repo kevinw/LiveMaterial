@@ -35,6 +35,7 @@ static mutex compileMutex;
 static std::condition_variable compileCV;
 static vector<CompileTask> pendingCompileTasks;
 
+static bool writeDebugFiles = false;
 static bool shaderDebugging = false;
 static int optimizationLevel = 3;
 static int numUniformChanges = 0;
@@ -1042,7 +1043,7 @@ static void MaybeCompileNewShaders() {
     if (isOpenGLDevice(s_DeviceType)) {
         bool needsUpdate = false;
         if (shaderSource.fragShader.size() > 0) {
-          GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), "/Users/kevin/Desktop/frag.glsl");
+          GLuint newFrag = loadShader(GL_FRAGMENT_SHADER, shaderSource.fragShader.c_str(), writeDebugFiles ? "/Users/kevin/Desktop/frag.glsl" : nullptr);
           if (newFrag) {
               if (g_FShader)
                   glDeleteShader(g_FShader);
@@ -1052,7 +1053,7 @@ static void MaybeCompileNewShaders() {
         }
         
         if (shaderSource.vertShader.size() > 0) {
-          GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), "/Users/kevin/Desktop/vert.glsl");
+          GLuint newVert = loadShader(GL_VERTEX_SHADER, shaderSource.vertShader.c_str(), writeDebugFiles ? "/Users/kevin/Desktop/vert.glsl" : nullptr);
           if (newVert) {
               if (g_VProg)
                   glDeleteShader(g_VProg);
