@@ -160,7 +160,7 @@ static bool verbose = false;
 static bool updateUniforms = true;
 static bool didInit = false;
 #if SUPPORT_D3D11
-static void updateUniformsD3D11(ID3D11DeviceContext* ctx);
+static void updateUniformsD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
 #endif
 static void updateUniformsGL();
 static void clearUniforms();
@@ -472,7 +472,7 @@ struct MyVertex {
 };
 #pragma pack(pop, r1)   // n = 2 , stack popped
 static void SetDefaultGraphicsState ();
-static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts);
+static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts, int uniformIndex);
 
 static GLuint	g_VProg   = 0;
 static GLuint	g_FShader = 0;
@@ -584,6 +584,8 @@ size_t constantBufferSize = 0;
 
 unsigned char* gpuBuffer = nullptr;
 
+#define MAX_GPU_BUFFERS 4
+
 void ensureConstantBufferSize(size_t size) {
 	if (constantBufferSize < size) {
 		if (constantBuffer)
@@ -593,10 +595,10 @@ void ensureConstantBufferSize(size_t size) {
 			delete[] gpuBuffer;
 
 		constantBuffer = new unsigned char[size];
-		gpuBuffer = new unsigned char[size];
+		gpuBuffer = new unsigned char[size * MAX_GPU_BUFFERS];
         
         memset(constantBuffer, 0, size);
-        memset(gpuBuffer, 0, size);
+        memset(gpuBuffer, 0, size * MAX_GPU_BUFFERS);
 
 		constantBufferSize = size;
 	}
@@ -610,8 +612,10 @@ void ensureConstantBufferSize(size_t size) {
 // be the integer passed to IssuePluginEvent. In this example, we just ignore
 // that value.
 
-static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
+static void UNITY_INTERFACE_API OnRenderEvent(int uniformIndex)
 {
+	assert(uniformIndex < MAX_GPU_BUFFERS);
+
 	// Unknown graphics device type? Do nothing.
 	if (s_DeviceType == kUnityGfxRendererNull)
 		return;
@@ -652,7 +656,7 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 
 	// Actual functions defined below
 	SetDefaultGraphicsState ();
-	DoRendering (worldMatrix, identityMatrix, projectionMatrix, verts);
+	DoRendering (worldMatrix, identityMatrix, projectionMatrix, verts, uniformIndex);
 }
 
 // --------------------------------------------------------------------------
@@ -962,8 +966,10 @@ static void constantBufferReflect(ID3DBlob* shader) {
 				}
 			}
 		}
+		GUARD_GPU;
 		ensureConstantBufferSize(d3d11ConstantBufferSize);
-		memset(constantBuffer, 0, d3d11ConstantBufferSize);
+		if (constantBuffer)
+			memset(constantBuffer, 0, d3d11ConstantBufferSize);
 	}
 	
 
@@ -1359,7 +1365,7 @@ static void SetDefaultGraphicsState ()
 static void setupPendingResourcesD3D11(ID3D11DeviceContext* ctx);
 #endif
 
-static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts)
+static void DoRendering (const float* worldMatrix, const float* identityMatrix, float* projectionMatrix, const MyVertex* verts, int uniformIndex)
 {
 	// Does actual rendering of a simple triangle
 	#if SUPPORT_D3D9
@@ -1407,7 +1413,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 		g_D3D11Device->GetImmediateContext (&ctx);
 		setupPendingResourcesD3D11(ctx);
 		if (updateUniforms)
-			updateUniformsD3D11(ctx);	
+			updateUniformsD3D11(ctx, uniformIndex);	
 		ctx->VSSetShader (g_D3D11VertexShader, NULL, 0);		
 		ctx->PSSetShader (g_D3D11PixelShader, NULL, 0);
 		ctx->PSSetConstantBuffers(0, 1, &d3d11ConstantBuffer);
@@ -1623,12 +1629,13 @@ static void printUniforms() {
 }
 
 
-static void submitUniforms() {
+static void submitUniforms(int uniformIndex) {
 	GUARD_GPU;
 	GUARD_UNIFORMS;
+	assert(uniformIndex < MAX_GPU_BUFFERS);
 	if (gpuBuffer && constantBuffer && numUniformChanges > 0) {
 		numUniformChanges = 0;
-		memcpy(gpuBuffer, constantBuffer, constantBufferSize);
+		memcpy(gpuBuffer + constantBufferSize * uniformIndex, constantBuffer, constantBufferSize);
 	}
 }
 
@@ -1739,10 +1746,11 @@ static void logprop(const char* name) {
 }
 
 #if SUPPORT_D3D11
-static void updateUniformsD3D11(ID3D11DeviceContext* ctx) {
+static void updateUniformsD3D11(ID3D11DeviceContext* ctx, int uniformIndex) {
 	GUARD_GPU;
+	assert(uniformIndex < MAX_GPU_BUFFERS);
 	if (d3d11ConstantBuffer && d3d11ConstantBufferSize > 0) {
-		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, 0, gpuBuffer, 0, 0);
+		ctx->UpdateSubresource(d3d11ConstantBuffer, 0, 0, gpuBuffer + constantBufferSize * uniformIndex, 0, 0);
 	}
 }
 
@@ -2077,7 +2085,7 @@ UNITY_INTERFACE_EXPORT void SetUpdateUniforms(bool update) { updateUniforms = up
 UNITY_INTERFACE_EXPORT void SetVerbose(bool verboseEnabled) { verbose = verboseEnabled; }
 UNITY_INTERFACE_EXPORT void SetOptimizationLevel(int level) { optimizationLevel = level; }
 UNITY_INTERFACE_EXPORT void SetShaderDebugging(bool shaderDebuggingEnabled) { shaderDebugging = shaderDebuggingEnabled;  }
-UNITY_INTERFACE_EXPORT void SubmitUniforms() { submitUniforms(); }
+UNITY_INTERFACE_EXPORT void SubmitUniforms(int uniformIndex) { submitUniforms(uniformIndex); }
 UNITY_INTERFACE_EXPORT Stats GetStats() { return stats; }
 UNITY_INTERFACE_EXPORT void SetStats(Stats newStats) { stats = newStats; }
 UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
