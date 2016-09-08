@@ -63,9 +63,13 @@ FuncPtr GetDebugFunc();
 #define Debug(m) do { if (GetDebugFunc()) { GetDebugFunc()(m); } else { std::cout << m << std::endl; } } while(0);
 
 #define DebugSS(ssexp) do { \
+	std::stringstream _ss; _ss << ssexp; \
+	std::string _sDebugString(_ss.str()); \
     if (GetDebugFunc()) { \
-        std::stringstream ss; ss << ssexp; std::string s(ss.str()); GetDebugFunc()(s.c_str()); \
-    } \
+        GetDebugFunc()(_sDebugString.c_str()); \
+    } else { \
+		std::cout << _sDebugString.c_str() << std::endl; \
+	} \
 } while(0);
 
 struct ShaderSource {

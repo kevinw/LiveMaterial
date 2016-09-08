@@ -37,7 +37,6 @@ static vector<CompileTask> pendingCompileTasks;
 
 static bool shaderDebugging = false;
 static int optimizationLevel = 3;
-static int numUniformChanges = 0;
 
 #ifdef SUPPORT_D3D
 static std::thread* compileThread;
@@ -117,8 +116,102 @@ static mutex texturesMutex;
 
 #define NUM_VERTS 6
 
-struct ShaderProp;
+unsigned char* constantBuffer = nullptr;
+size_t constantBufferSize = 0;
+
+unsigned char* gpuBuffer = nullptr;
+
+#define MAX_GPU_BUFFERS 4
+
+enum PropType {
+	Float,
+	Vector2,
+	Vector3,
+	Vector4,
+	Matrix,
+};
+
+static int numElemsForPropType(PropType type) {
+	switch (type) {
+	case PropType::Float: return 1;
+	case PropType::Vector4: return 4;
+	case PropType::Vector3: return 3;
+	case PropType::Vector2: return 2;
+	case PropType::Matrix: return 16;
+	default: {
+		assert(false);
+		Debug("Unknown proptype");
+	}
+	}
+
+}
+
+const std::string propTypeStrings[] = {
+	"Float",
+	"Vector2",
+	"Vector3",
+	"Vector4",
+	"Matrix",
+};
+
+
+struct ShaderProp {
+	ShaderProp(PropType type_, std::string name_)
+		: type(type_)
+		, name(name_)
+	{
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
+		uniformIndex = UNIFORM_UNSET;
+#endif
+		offset = 0;
+		size = 0;
+		arraySize = 0;
+
+#ifdef SUPPORT_D3D
+		arraySize = 1;
+#endif
+	}
+
+
+	PropType type;
+	const std::string typeString() { return propTypeStrings[(size_t)type]; }
+	std::string name;
+
+	float value(int n) {
+		if (!constantBuffer || size == 0) return 0.0f;
+		return *((float*)(constantBuffer + offset + n * sizeof(float)));
+	}
+
+#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
+	static const int UNIFORM_UNSET = -2;
+	static const int UNIFORM_INVALID = -1;
+	int uniformIndex;
+#endif
+
+	uint16_t offset;
+	uint16_t size;
+	uint16_t arraySize;
+
+	static PropType typeForSize(uint16_t size) {
+		switch (size) {
+		case sizeof(float) : return Float;
+		case 2 * sizeof(float) : return Vector2;
+		case 3 * sizeof(float) : return Vector3;
+		case 4 * sizeof(float) : return Vector4;
+		case 16 * sizeof(float) : return Matrix;
+		default: {
+			DebugSS("unknown size " << size);
+			assert(false);
+			return Float;
+		}
+		}
+	}
+};
+
 static ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
+typedef std::map<std::string, ShaderProp*> PropMap;
+PropMap shaderProps; // a mapping of name -> prop description, type, and offset into the constant buffer
+
 
 // --------------------------------------------------------------------------
 // Include headers for the graphics APIs we support
@@ -163,7 +256,6 @@ static bool didInit = false;
 static void updateUniformsD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
 #endif
 static void updateUniformsGL();
-static void clearUniforms();
 #if SUPPORT_OPENGL_UNIFIED
 static void DiscoverGLUniforms(GLuint program);
 #endif
@@ -579,29 +671,46 @@ void CompileTask::operator()() {
 static void MaybeCompileNewShaders();
 static void MaybeLoadNewShaders();
 
-unsigned char* constantBuffer = nullptr;
-size_t constantBufferSize = 0;
+static void copyProps(PropMap* oldProps, PropMap* newProps, unsigned char* oldBuffer, unsigned char* newBuffer) {
+	for (auto i = oldProps->begin(); i != oldProps->end(); ++i) {
+		auto oldProp = i->second;
+		auto newPropI = newProps->find(oldProp->name);
+		if (newPropI == newProps->end())
+			continue;
+		auto newProp = newPropI->second;
+		if (newProp->type != oldProp->type ||
+			newProp->arraySize != oldProp->arraySize ||
+			newProp->size != oldProp->size)
+			continue;
 
-unsigned char* gpuBuffer = nullptr;
+		int numElems = numElemsForPropType(newProp->type);
+		size_t bytesToCopy = sizeof(float) * numElems * newProp->arraySize;
+		memcpy(newBuffer + newProp->offset, oldBuffer + oldProp->offset, bytesToCopy);
+	}	
+}
 
-#define MAX_GPU_BUFFERS 4
+void ensureConstantBufferSize(size_t size, PropMap* oldProps = nullptr, PropMap* newProps = nullptr) {
+	// must have GUARD_UNIFORMS and GUARD_GPU
 
-void ensureConstantBufferSize(size_t size) {
-	if (constantBufferSize < size) {
-		if (constantBuffer)
-			delete[] constantBuffer;
+	auto oldConstantBuffer = constantBuffer;
+	auto oldGpuBuffer = gpuBuffer;
+	auto oldConstantBufferSize = constantBufferSize;
 
-		if (gpuBuffer)
-			delete[] gpuBuffer;
+	constantBuffer = new unsigned char[size];
+	gpuBuffer = new unsigned char[size * MAX_GPU_BUFFERS];
+	constantBufferSize = size;
 
-		constantBuffer = new unsigned char[size];
-		gpuBuffer = new unsigned char[size * MAX_GPU_BUFFERS];
-        
-        memset(constantBuffer, 0, size);
-        memset(gpuBuffer, 0, size * MAX_GPU_BUFFERS);
+    memset(constantBuffer, 0, size);
+    memset(gpuBuffer, 0, size * MAX_GPU_BUFFERS);		
 
-		constantBufferSize = size;
+	if (oldProps && newProps) {
+		copyProps(oldProps, newProps, oldConstantBuffer, constantBuffer);
+		for (int i = 0; i < MAX_GPU_BUFFERS; ++i)
+			copyProps(oldProps, newProps, oldGpuBuffer + oldConstantBufferSize * i, gpuBuffer + constantBufferSize * i);
 	}
+
+	if (oldConstantBuffer) delete[] oldConstantBuffer;
+	if (oldGpuBuffer) delete[] oldGpuBuffer;
 }
 
 
@@ -929,7 +1038,8 @@ static void constantBufferReflect(ID3DBlob* shader) {
 	{
 		GUARD_UNIFORMS;
 		SAFE_RELEASE(d3d11ConstantBuffer);
-		clearUniforms();
+		PropMap oldProps = shaderProps;
+		shaderProps.clear();		
 		d3d11ConstantBufferSize = 0;
 
 		if (desc.ConstantBuffers > 0) {
@@ -946,7 +1056,6 @@ static void constantBufferReflect(ID3DBlob* shader) {
 				propForNameSizeOffset(var_desc.Name, var_desc.Size, var_desc.StartOffset);
 				d3d11ConstantBufferSize = max(d3d11ConstantBufferSize, var_desc.StartOffset + var_desc.Size);
 			}
-
 
 			if (d3d11ConstantBufferSize > 0) {
 				d3d11ConstantBufferSize = roundUp(d3d11ConstantBufferSize, 16);
@@ -967,15 +1076,10 @@ static void constantBufferReflect(ID3DBlob* shader) {
 			}
 		}
 		GUARD_GPU;
-		ensureConstantBufferSize(d3d11ConstantBufferSize);
-		if (constantBuffer)
-			memset(constantBuffer, 0, d3d11ConstantBufferSize);
-	}
-	
+		ensureConstantBufferSize(d3d11ConstantBufferSize, &oldProps, &shaderProps);
+	}	
 
 	pReflector->Release();
-		
-
 }
 
 
@@ -1065,7 +1169,7 @@ static void MaybeCompileNewShaders() {
           LinkProgram();
           {
             GUARD_UNIFORMS;
-            clearUniforms();
+			shaderProps.clear();
             if (g_Program)
               DiscoverGLUniforms(g_Program);
           }
@@ -1466,95 +1570,7 @@ static void DoRendering (const float* worldMatrix, const float* identityMatrix, 
 	#endif
 }
 
-enum PropType {
-    Float,
-    Vector2,
-    Vector3,
-    Vector4,
-    Matrix,
-};
 
-static int numElemsForPropType(PropType type) {
-    switch (type) {
-        case PropType::Float: return 1;
-        case PropType::Vector4: return 4;
-        case PropType::Vector3: return 3;
-        case PropType::Vector2: return 2;
-        case PropType::Matrix: return 16;
-        default: {
-            assert(false);
-            Debug("Unknown proptype");
-        }
-    }
-
-}
-
-const std::string propTypeStrings[] = {
-    "Float",
-    "Vector2",
-    "Vector3",
-    "Vector4",
-    "Matrix",
-};
-
-
-struct ShaderProp {
-    ShaderProp(PropType type_, std::string name_)
-    : type(type_)
-    , name(name_)
-    {
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
-        uniformIndex = UNIFORM_UNSET;
-#endif
-		offset = 0;
-		size = 0;
-        arraySize = 0;
-
-#ifdef SUPPORT_D3D
-		arraySize = 1;
-#endif
-    }
-
-    
-    PropType type;
-    const std::string typeString() { return propTypeStrings[(size_t)type]; }
-    std::string name;
-
-  float* floatBufferPointer() { return (float*)(constantBuffer + offset); }
-
-	float value(int n) {
-		if (!constantBuffer || size == 0) return 0.0f;
-		return *((float*)(constantBuffer + offset + n * sizeof(float)));
-	}
-    
-#if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
-    static const int UNIFORM_UNSET = -2;
-    static const int UNIFORM_INVALID = -1;
-    int uniformIndex;
-#endif
-
-	uint16_t offset;
-	uint16_t size;
-    uint16_t arraySize;
-
-	static PropType typeForSize(uint16_t size) {
-		switch (size) {
-		case sizeof(float) : return Float;
-		case 2 * sizeof(float) : return Vector2;
-		case 3 * sizeof(float) : return Vector3;
-		case 4 * sizeof(float) : return Vector4;
-		case 16 * sizeof(float) : return Matrix;
-		default: {
-			DebugSS("unknown size " << size);
-			assert(false);
-			return Float;
-		}
-		}
-	}
-};
-
-typedef std::map<std::string, ShaderProp*> PropMap;
-PropMap shaderProps;
 
 static bool hasProp(const char* name) {
     return shaderProps.find(name) != shaderProps.end();
@@ -1633,14 +1649,9 @@ static void submitUniforms(int uniformIndex) {
 	GUARD_GPU;
 	GUARD_UNIFORMS;
 	assert(uniformIndex < MAX_GPU_BUFFERS);
-	if (gpuBuffer && constantBuffer && numUniformChanges > 0) {
-		numUniformChanges = 0;
+	if (gpuBuffer && constantBuffer) {
 		memcpy(gpuBuffer + constantBufferSize * uniformIndex, constantBuffer, constantBufferSize);
 	}
-}
-
-static void clearUniforms() {
-    shaderProps.clear();
 }
 
 #if SUPPORT_OPENGL_UNIFIED
@@ -1840,19 +1851,15 @@ static void updateUniformsGL() {
 		switch (prop->type) {
 		case Float:
 			glUniform1f(prop->uniformIndex, prop->value(0));
-			//glUniform1fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Vector2:
 			glUniform2f(prop->uniformIndex, prop->value(0), prop->value(1));
-			//glUniform2fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Vector3:
             glUniform3f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2));
-      //glUniform3fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Vector4:
 			glUniform4f(prop->uniformIndex, prop->value(0), prop->value(1), prop->value(2), prop->value(3));
-			//glUniform4fv(prop->uniformIndex, prop->arraySize, prop->floatBufferPointer());
 			break;
 		case Matrix: {
 			const int numElements = 1;
@@ -1902,8 +1909,6 @@ static void setproparray(const char* name, PropType type, const char* methodName
     }
     
     int numElems = numElemsForPropType(type);
-    
-    numUniformChanges++;
     
     if (numFloats < prop->arraySize * numElems) {
         DebugSS("not enough elements in " << methodName << " array (expected " << (prop->arraySize * numElems) << " but got " << numFloats << ")");
