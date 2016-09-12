@@ -33,7 +33,7 @@ using std::string;
 	#define SUPPORT_D3D11 1 // comment this out if you don't have D3D11 header/library files
 	#ifdef _MSC_VER
 		#if _MSC_VER >= 1900
-			#define SUPPORT_D3D12 1
+			//#define SUPPORT_D3D12 1 // TODO: I don't want to support d3d12 yet.
 		#endif
 	#endif
 	#define SUPPORT_OPENGL_LEGACY 1
@@ -47,6 +47,7 @@ using std::string;
 	#define SUPPORT_OPENGL_UNIFIED 1
 	#define SUPPORT_OPENGL_CORE 1
 #endif
+
 
 #include <sstream>
 

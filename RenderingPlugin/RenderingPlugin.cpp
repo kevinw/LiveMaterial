@@ -142,6 +142,7 @@ static int numElemsForPropType(PropType type) {
 	default: {
 		assert(false);
 		Debug("Unknown proptype");
+		return 0;
 	}
 	}
 
@@ -1738,7 +1739,7 @@ static void DiscoverGLUniforms(GLuint program) {
     }
       
       textureIDs.clear();
-      for (size_t i = 0; i < textureUnit; ++i)
+      for (int i = 0; i < textureUnit; ++i)
           textureIDs.push_back(0);
   }
 
@@ -1819,7 +1820,7 @@ static void updateUniformsGL() {
         return;
     
     
-    for (int textureUnit = 0; textureUnit < textureIDs.size(); ++textureUnit) {
+    for (size_t textureUnit = 0; textureUnit < textureIDs.size(); ++textureUnit) {
         auto uniformLoc = uniformLocs[textureUnit];
         auto textureID = textureIDs[textureUnit];
         if (textureID < 1)
@@ -1914,7 +1915,7 @@ static void setproparray(const char* name, PropType type, const char* methodName
     if (numFloats < prop->arraySize * numElems) {
         DebugSS("not enough elements in " << methodName << " array (expected " << (prop->arraySize * numElems) << " but got " << numFloats << ")");
     } else {
-        size_t bytesToCopy = fmin(sizeof(float) * numFloats, sizeof(float) * numElems * prop->arraySize);
+        size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, sizeof(float) * numElems * prop->arraySize);
         memcpy(constantBuffer + prop->offset, value, bytesToCopy);
     }
 }

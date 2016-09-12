@@ -22,7 +22,7 @@
     <ProjectGuid>{F7CFEF5A-54BD-42E8-A59E-54ABAEB4EA9C}</ProjectGuid>
     <RootNamespace>RenderingPlugin</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.10586.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
     <ProjectName>LiveMaterial</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -104,28 +104,12 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
-      <ModuleDefinitionFile>..\RenderingPlugin.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>
+      </ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>SETLOCAL
-
-if "$(PlatformShortName)" == "x86" (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86
-) else (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86_64
-)
-
-set TARGET_SHADER_PATH=$(SolutionDir)..\..\UnityProject\Assets\StreamingAssets\Shaders\DX11_9_1\
-
-echo Target Plugin Path is %TARGET_PLUGIN_PATH%
-echo Target Shader Path is %TARGET_SHADER_PATH%
-
-copy /Y "$(TargetPath)" "%TARGET_PLUGIN_PATH%\$(TargetFileName)"
-copy /Y "$(TargetDir)SimpleVertexShader.cso" "%TARGET_SHADER_PATH%SimpleVertexShader.cso"
-copy /Y "$(TargetDir)SimplePixelShader.cso" "%TARGET_SHADER_PATH%SimplePixelShader.cso"
-
-ENDLOCAL
-</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -152,7 +136,7 @@ ENDLOCAL
       </Command>
     </PostBuildEvent>
     <CustomBuildStep>
-      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "d:\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "d:\src\raymarching\Assets\Plugins\x86_64\"</Command>
+      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\"</Command>
     </CustomBuildStep>
     <CustomBuildStep>
       <Message>Copying DLL to Unity project folder</Message>
@@ -181,29 +165,12 @@ ENDLOCAL
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <TargetMachine>MachineX86</TargetMachine>
-      <ModuleDefinitionFile>..\RenderingPlugin.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>
+      </ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
-      <Command>SETLOCAL
-
-if "$(PlatformShortName)" == "x86" (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86
-) else (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\UnityProject\Assets\Plugins\x86_64
-)
-
-set TARGET_SHADER_PATH=$(SolutionDir)..\..\UnityProject\Assets\StreamingAssets\Shaders\DX11_9_1\
-
-echo Target Plugin Path is %TARGET_PLUGIN_PATH%
-echo Target Shader Path is %TARGET_SHADER_PATH%
-
-copy /Y "$(TargetPath)" "%TARGET_PLUGIN_PATH%\$(TargetFileName)"
-copy /Y "$(TargetDir)SimpleVertexShader.cso" "%TARGET_SHADER_PATH%SimpleVertexShader.cso"
-copy /Y "$(TargetDir)SimplePixelShader.cso" "%TARGET_SHADER_PATH%SimplePixelShader.cso"
-
-
-ENDLOCAL
-</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -233,7 +200,7 @@ ENDLOCAL
       </Command>
     </PostBuildEvent>
     <CustomBuildStep>
-      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "d:\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "d:\src\raymarching\Assets\Plugins\x86_64\"</Command>
+      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\"</Command>
     </CustomBuildStep>
     <CustomBuildStep>
       <Message>Copying DLL to Unity project folder</Message>
