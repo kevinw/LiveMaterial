@@ -1108,20 +1108,13 @@ static void MaybeLoadNewShaders() {
 			if (FAILED(hr)) {
 				Debug("CreatePixelShader failed\n"); DebugHR(hr);
 			}
-			else {
-				//Debug("loaded fragment shader");
-			}
 		}
 		else if (compileTaskOutput.shaderType == Vertex) {			
 			SAFE_RELEASE(g_D3D11VertexShader);
 			HRESULT hr = g_D3D11Device->CreateVertexShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &g_D3D11VertexShader);
 			if (FAILED(hr)) {
-				Debug("CreateVertexShader failed");
-				DebugHR(hr);
+				Debug("CreateVertexShader failed"); DebugHR(hr);
 			}
-			else {
-				//Debug("loaded vertex shader");
-			}			
 		}
 		else {
 			assert(false);
@@ -1743,16 +1736,6 @@ static void DiscoverGLUniforms(GLuint program) {
 }
 #endif
 
-static void logprop(const char* name) {
-	auto prop = propForName(name, PropType::Float);
-	if (prop) {
-		DebugSS(name << ": " << prop->value(0) << std::endl);
-	}
-	else {
-		Debug("no BoxEnabled prop");
-	}
-}
-
 #if SUPPORT_D3D11
 static void updateUniformsD3D11(ID3D11DeviceContext* ctx, int uniformIndex) {
 	GUARD_GPU;
@@ -1812,8 +1795,7 @@ static void updateUniformsGL() {
 	assert(isOpenGLDevice(s_DeviceType));
 
     if (g_Program == 0)
-        return;
-    
+        return;    
     
     for (size_t textureUnit = 0; textureUnit < textureIDs.size(); ++textureUnit) {
         auto uniformLoc = uniformLocs[textureUnit];
