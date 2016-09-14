@@ -109,6 +109,9 @@ static mutex uniformMutex;
 static mutex callbackMutex;
 #define GUARD_CALLBACK lock_guard<mutex> _lock_guard_callbacks(callbackMutex)
 
+static mutex debugMutex;
+#define GUARD_DEBUG lock_guard<mutex> _lock_guard_debug(debugMutex)
+
 static mutex gpuMutex;
 #define GUARD_GPU lock_guard<mutex> _lock_guard_gpu(gpuMutex)
 
@@ -649,18 +652,10 @@ void CompileTask::operator()() {
 		CompileTaskOutput output = { shaderType, shaderBlob };
 		if (!shaderCompilerOutputs.write(output)) {
 			Debug("Shader compiler output queue is full");
-		} 
-		else {
+		} else {
 			GUARD_CALLBACK;
-			if (PluginCallbackFunc) {
-				try {
-					PluginCallbackFunc(NeedsSceneViewRepaint);
-				}
-				catch (const std::exception& ex) {
-					(void)ex;
-					PluginCallbackFunc = nullptr;
-				}
-			}
+			if (PluginCallbackFunc)
+				PluginCallbackFunc(NeedsSceneViewRepaint);
 		}
 
 	}
@@ -1825,12 +1820,13 @@ static void updateUniformsGL() {
         auto textureID = textureIDs[textureUnit];
         if (textureID < 1)
             continue;
-        
-        glActiveTexture(GL_TEXTURE0 + textureUnit);
+		        
+		GLenum activeTexture = GL_TEXTURE0 + (GLenum)textureUnit;
+        glActiveTexture(activeTexture);
         printOpenGLError();
         glBindTexture(GL_TEXTURE_2D, textureID);
         if (printOpenGLError()) { DebugSS("Error binding texture with id " << textureID); }
-        glUniform1i(uniformLoc, textureUnit);
+        glUniform1i(uniformLoc, (GLint)textureUnit);
         printOpenGLError();
 
         int w = 0, h = 0;
@@ -1890,13 +1886,15 @@ UNITY_INTERFACE_EXPORT void SetPluginCallback(PluginCallback fp) {
 	PluginCallbackFunc = fp;
 }
 
-UNITY_INTERFACE_EXPORT  int SetDebugFunction(FuncPtr fp) {
-    _DebugFunc = fp;
-    return 0;
+UNITY_INTERFACE_EXPORT void SetDebugFunction(FuncPtr fp) {
+	GUARD_DEBUG;
+	_DebugFunc = fp;
 }
 
-UNITY_INTERFACE_EXPORT void ClearDebugFunction() { _DebugFunc = nullptr; }
-
+UNITY_INTERFACE_EXPORT void ClearDebugFunction() {
+	GUARD_DEBUG;
+	_DebugFunc = nullptr;
+}
     
 static void setproparray(const char* name, PropType type, const char* methodName, float* value, int numFloats) {
     GUARD_UNIFORMS;

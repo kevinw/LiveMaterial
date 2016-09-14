@@ -61,7 +61,9 @@ typedef void(*PluginCallback)(PluginMessage mssage);
 typedef void(*FuncPtr)(const char *);
 FuncPtr GetDebugFunc();
 
-#define Debug(m) do { if (GetDebugFunc()) { GetDebugFunc()(m); } else { std::cout << m << std::endl; } } while(0);
+#define Debug(m) do { \
+	GUARD_DEBUG; \
+	if (GetDebugFunc()) { GetDebugFunc()(m); } else { std::cout << m << std::endl; } } while(0);
 
 #define DebugSS(ssexp) do { \
 	std::stringstream _ss; _ss << ssexp; \
