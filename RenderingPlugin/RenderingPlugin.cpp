@@ -43,14 +43,27 @@ static int optimizationLevel = 3;
 static std::thread* compileThread;
 
 
-static void submitCompileTasks(vector<CompileTask> compileTasks) {
-	if (compileTasks.size() > 0) {
-		{
-			std::lock_guard<mutex> lock(compileMutex);
-			pendingCompileTasks = compileTasks; // TODO: should probably interleve frag/vert here
+static void submitCompileTasks(vector<CompileTask> compileTasks, bool append) {
+	if (compileTasks.size() == 0)
+		return;
+
+	{
+		std::lock_guard<mutex> lock(compileMutex);
+
+		if (!append) {
+			// if we're not appending, replace any vertex and fragment shaders
+			vector<CompileTask> newTasks;
+			for (size_t i = 0; i < pendingCompileTasks.size(); ++i) {
+				auto shaderType = pendingCompileTasks[i].shaderType;
+				if (!(shaderType == Fragment || shaderType == Vertex))
+					newTasks.push_back(pendingCompileTasks[i]);
+			}
+			pendingCompileTasks = newTasks;
 		}
-		compileCV.notify_one();
+
+		pendingCompileTasks.insert(pendingCompileTasks.end(), compileTasks.begin(), compileTasks.end());
 	}
+	compileCV.notify_one();
 }
 
 static void compileThreadFunc();
@@ -374,6 +387,23 @@ const char* getGLTypeName(GLenum typeEnum) {
 static vector<ID3D11ShaderResourceView*> resourceViews;
 static vector<std::pair<ID3D11Resource*, size_t> > pendingResources;
 static std::map<string, size_t> resourceViewIndexes;
+
+struct Shader {
+	Shader(int id);
+	~Shader();
+
+	int id;
+	string source;
+	string entryPoint;
+	ID3D11ComputeShader* d3d11ComputeShader;
+
+	bool IsReady() const { return this->d3d11ComputeShader != nullptr; }
+	void SetSource(const char* source, const char* entryPoint);
+	void Dispatch(int x, int y, int z);
+};
+
+static Shader* findComputeShader(int id);
+
 #endif
 
 #if SUPPORT_OPENGL_UNIFIED
@@ -598,6 +628,7 @@ static Stats stats = {};
 struct CompileTaskOutput {
 	ShaderType shaderType;
 	ID3DBlob* shaderBlob;
+	int shaderId;
 };
 
 folly::ProducerConsumerQueue<CompileTaskOutput> shaderCompilerOutputs(10);
@@ -605,6 +636,16 @@ HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR ent
 
 static void constantBufferReflect(ID3DBlob*);
 
+static const char* profileNameForShaderType(ShaderType shaderType) {
+	switch (shaderType) {
+	case Fragment: return "ps_5_0";
+	case Vertex: return "vs_5_0";
+	case Compute: return "cs_5_0";
+	default:
+		assert(false);
+		return nullptr;
+	}
+}
 
 void CompileTask::operator()() {
 	const D3D_SHADER_MACRO defines[] = {
@@ -612,11 +653,8 @@ void CompileTask::operator()() {
 		NULL, NULL
 	};
 
-	const char* profile = shaderType == Fragment ? "ps_5_0" : "vs_5_0";
-
 	ID3DBlob *shaderBlob = nullptr;
 	ID3DBlob *error = nullptr;
-	StopWatch d3dCompileWatch;
 
 	if (shaderType == Fragment)
 		stats.compileState = CompileState::Compiling;
@@ -636,6 +674,9 @@ void CompileTask::operator()() {
 		flags |= D3DCOMPILE_DEBUG;
 	}
 
+	auto profile = profileNameForShaderType(shaderType);
+
+	StopWatch d3dCompileWatch;
 	auto hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error, flags);
 
 	if (FAILED(hr)) {
@@ -649,7 +690,7 @@ void CompileTask::operator()() {
 			stats.compileState = CompileState::Success;
 		}
 
-		CompileTaskOutput output = { shaderType, shaderBlob };
+		CompileTaskOutput output = { shaderType, shaderBlob, this->id };
 		if (!shaderCompilerOutputs.write(output)) {
 			Debug("Shader compiler output queue is full");
 		} else {
@@ -1096,27 +1137,38 @@ static bool getLatestShader(ShaderSource& shaderSource) {
 
 static void MaybeLoadNewShaders() {
 #ifdef SUPPORT_D3D
-	CompileTaskOutput compileTaskOutput;
+	CompileTaskOutput compileTaskOutput{ Fragment, nullptr, -1 };
 	while (shaderCompilerOutputs.read(compileTaskOutput)) {
 		ID3DBlob* shaderBlob = compileTaskOutput.shaderBlob;
 		assert(shaderBlob);
 
-		if (compileTaskOutput.shaderType == Fragment) {
+		auto buf = shaderBlob->GetBufferPointer();
+		auto bufSize = shaderBlob->GetBufferSize();
+		assert(buf && bufSize > 0);
+
+		switch (compileTaskOutput.shaderType) {
+		case Fragment: {
 			constantBufferReflect(shaderBlob);
 			SAFE_RELEASE(g_D3D11PixelShader);
-			HRESULT hr = g_D3D11Device->CreatePixelShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &g_D3D11PixelShader);
-			if (FAILED(hr)) {
-				Debug("CreatePixelShader failed\n"); DebugHR(hr);
-			}
+			HRESULT hr = g_D3D11Device->CreatePixelShader(buf, bufSize, nullptr, &g_D3D11PixelShader);
+			if (FAILED(hr)) { Debug("CreatePixelShader failed\n"); DebugHR(hr); }
+			break;
 		}
-		else if (compileTaskOutput.shaderType == Vertex) {			
+		case Vertex: {
 			SAFE_RELEASE(g_D3D11VertexShader);
-			HRESULT hr = g_D3D11Device->CreateVertexShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &g_D3D11VertexShader);
-			if (FAILED(hr)) {
-				Debug("CreateVertexShader failed"); DebugHR(hr);
-			}
+			HRESULT hr = g_D3D11Device->CreateVertexShader(buf, bufSize, nullptr, &g_D3D11VertexShader);
+			if (FAILED(hr)) { Debug("CreateVertexShader failed"); DebugHR(hr); }
+			break;
 		}
-		else {
+		case Compute: {
+			auto computeShader = findComputeShader(compileTaskOutput.shaderId);
+			if (computeShader) {
+				HRESULT hr = g_D3D11Device->CreateComputeShader(buf, bufSize, nullptr, &computeShader->d3d11ComputeShader);
+				if (FAILED(hr)) { Debug("CreateComputeShader failed"); DebugHR(hr); }
+			}
+			break;
+		}
+		default:
 			assert(false);
 		}
 
@@ -1787,7 +1839,71 @@ static void setupPendingResourcesD3D11(ID3D11DeviceContext* ctx) {
 	ctx->PSSetSamplers(0, numSamplers, &samplers[0]);
 }
 
+Shader::Shader(int id_)
+	: id(id_)
+	, d3d11ComputeShader(nullptr)
+{}
 
+Shader::~Shader() {
+	source = "";
+	entryPoint = "";
+	id = -1;
+	SAFE_RELEASE(d3d11ComputeShader);
+}
+
+void Shader::Dispatch(int threadGroupCountX, int threadGroupCountY, int threadGroupCountZ) {
+	if (!IsReady()) {
+		DebugSS("ComputeShader not IsReady(), cannot dispatch");
+		return;
+	}
+
+	ID3D11DeviceContext* ctx = nullptr;
+	g_D3D11Device->GetImmediateContext(&ctx);
+	if (!ctx) {
+		DebugSS("Could not obtain an immediate context");
+		return;
+	}
+
+	ID3D11UnorderedAccessView* ppUAViewNULL[1] = { nullptr };
+    ID3D11ShaderResourceView* ppSRVNULL[2] = { nullptr, nullptr };
+
+    ctx->CSSetShader(d3d11ComputeShader, nullptr, 0);
+    //ctx->CSSetShaderResources(0, 1, &m_srcDataGPUBufferView);
+    //ctx->CSSetUnorderedAccessViews(0, 1, &m_destDataGPUBufferView, nullptr);
+
+    ctx->Dispatch(threadGroupCountX, threadGroupCountY, threadGroupCountZ);
+
+    ctx->CSSetShader(nullptr, nullptr, 0);
+    ctx->CSSetUnorderedAccessViews(0, 1, ppUAViewNULL, nullptr);
+    ctx->CSSetShaderResources(0, 2, ppSRVNULL);
+
+	ctx->Release();
+}
+
+void Shader::SetSource(const char* source, const char* entryPoint) {
+	assert(source && entryPoint);
+	this->source = source;
+	this->entryPoint = entryPoint;
+
+	CompileTask task(Compute, source, entryPoint);
+	task.srcName = shaderIncludePath + "\\compute.hlsl";
+	task.id = id;
+	submitCompileTasks(vector<CompileTask> { task }, true);
+}
+
+
+std::map<int, Shader*> computeShaders;
+
+int nextComputeShaderId = 0;
+
+static Shader* findComputeShader(int id) {
+	auto iter = computeShaders.find(id);
+	if (iter == computeShaders.end()) {
+		DebugSS("no compute shader for id " << id);
+		return nullptr;
+	}
+	return iter->second;
+}
 #endif
 
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
@@ -2075,29 +2191,62 @@ UNITY_INTERFACE_EXPORT void SetShaderDebugging(bool shaderDebuggingEnabled) { sh
 UNITY_INTERFACE_EXPORT void SubmitUniforms(int uniformIndex) { submitUniforms(uniformIndex); }
 UNITY_INTERFACE_EXPORT Stats GetStats() { return stats; }
 UNITY_INTERFACE_EXPORT void SetStats(Stats newStats) { stats = newStats; }
-UNITY_INTERFACE_EXPORT void SetShaderSource(const char* fragShader, const char* fragEntryPoint, const char* vertexShader, const char* vertEntryPoint) {      
+
+UNITY_INTERFACE_EXPORT int CreateComputeShader() {
+	auto id = ++nextComputeShaderId;
+	computeShaders[id] = new Shader(id);
+	return id;
+}
+
+UNITY_INTERFACE_EXPORT bool GetComputeShaderReady(int id) {
+	auto computeShader = findComputeShader(id);
+	return computeShader && computeShader->IsReady();
+}
+
+UNITY_INTERFACE_EXPORT void Dispatch(int id, int ThreadGroupCountX, int ThreadGroupCountY, int ThreadGroupCountZ) {
+	auto computeShader = findComputeShader(id);
+	if (computeShader)
+		computeShader->Dispatch(ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ);
+
+}
+
+UNITY_INTERFACE_EXPORT void SetComputeShaderSource(int id, const char* src, const char* entryPoint) {
+	if (!src || !entryPoint) {
+		Debug("must give a non-null src and entryPoint");
+		return;
+	}
+	auto computeShader = findComputeShader(id);
+	if (computeShader)
+		computeShader->SetSource(src, entryPoint);
+}
+
+UNITY_INTERFACE_EXPORT void DestroyComputeShader(int id) {
+	auto computeShader = findComputeShader(id);
+	if (computeShader) {
+		computeShaders.erase(id);
+		delete computeShader;
+	}
+}
+
+UNITY_INTERFACE_EXPORT void SetShaderSource(
+	const char* fragShader, const char* fragEntryPoint,
+	const char* vertexShader, const char* vertEntryPoint,
+	const char* computeShader, const char* computeEntryPoint) {
 
 #ifdef SUPPORT_D3D
 	if (s_DeviceType == kUnityGfxRendererD3D11) {
 		vector<CompileTask> compileTasks;
 		if (fragShader && fragEntryPoint) {
-		  CompileTask task;
-		  task.entryPoint = fragEntryPoint;
-		  task.shaderType = Fragment;
-		  task.src = fragShader;
+		  CompileTask task(Fragment, fragShader, fragEntryPoint);
 		  task.srcName = shaderIncludePath + "\\fragment.hlsl";
 		  compileTasks.push_back(task);
 		}
 		if (vertexShader && vertEntryPoint) {
-		  CompileTask task;
-		  task.entryPoint = vertEntryPoint;
-		  task.shaderType = Vertex;
-		  task.src = vertexShader;
+		  CompileTask task(Vertex, vertexShader, vertEntryPoint);
 		  task.srcName = shaderIncludePath + "\\vertex.hlsl";
 		  compileTasks.push_back(task);
 		}
-
-		submitCompileTasks(compileTasks);
+		submitCompileTasks(compileTasks, false);
 
 		return;
   }

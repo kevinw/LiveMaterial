@@ -84,13 +84,25 @@ struct ShaderSource {
 
 enum ShaderType {
 	Vertex,
-	Fragment
+	Fragment,
+	Compute
 };
 
 struct CompileTask {
+	CompileTask(ShaderType shaderType_, const char* src, const char* entryPoint)
+		: shaderType(shaderType_)
+		, src(src)
+		, entryPoint(entryPoint)
+	{
+		id = -1;
+	}
+
 	ShaderType shaderType;
 	string src;
 	string srcName;
 	string entryPoint;
 	void operator()();
+	int id;
+
 };
+

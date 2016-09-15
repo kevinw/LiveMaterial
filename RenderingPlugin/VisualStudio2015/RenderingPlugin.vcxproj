@@ -136,7 +136,7 @@
       </Command>
     </PostBuildEvent>
     <CustomBuildStep>
-      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "d:\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "d:\src\raymarching\Assets\Plugins\x86_64\"</Command>
+      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\"</Command>
     </CustomBuildStep>
     <CustomBuildStep>
       <Message>Copying DLL to Unity project folder</Message>
@@ -200,7 +200,7 @@
       </Command>
     </PostBuildEvent>
     <CustomBuildStep>
-      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "d:\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "d:\src\raymarching\Assets\Plugins\x86_64\"</Command>
+      <Command>echo "COPYING" &amp; copy "$(TargetPath)" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\" &amp; copy "$(TargetDir)\$(ProjectName).pdb" "c:\users\kevin\src\raymarching\Assets\Plugins\x86_64\"</Command>
     </CustomBuildStep>
     <CustomBuildStep>
       <Message>Copying DLL to Unity project folder</Message>
