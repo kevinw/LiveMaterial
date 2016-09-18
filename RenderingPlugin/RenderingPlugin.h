@@ -55,10 +55,10 @@ enum PluginMessage {
 	NeedsSceneViewRepaint
 };
 
-typedef void(*PluginCallback)(PluginMessage mssage);
+typedef void(_stdcall*PluginCallback)(PluginMessage mssage);
 
 
-typedef void(*FuncPtr)(const char *);
+typedef void(_stdcall*FuncPtr)(const char *);
 FuncPtr GetDebugFunc();
 
 #define Debug(m) do { \
