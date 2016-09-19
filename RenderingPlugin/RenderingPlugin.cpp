@@ -42,6 +42,14 @@ static int optimizationLevel = 3;
 #ifdef SUPPORT_D3D
 static std::thread* compileThread;
 
+static void compileThreadFunc();
+
+static void startCompileThread() {
+	if (compileThread == nullptr) {
+		compileThread = new std::thread(compileThreadFunc);
+		compileThread->detach();
+	}
+}
 
 static void submitCompileTasks(vector<CompileTask> compileTasks, bool append) {
 	if (compileTasks.size() == 0)
@@ -62,16 +70,11 @@ static void submitCompileTasks(vector<CompileTask> compileTasks, bool append) {
 		}
 
 		pendingCompileTasks.insert(pendingCompileTasks.end(), compileTasks.begin(), compileTasks.end());
+		startCompileThread();
 	}
 	compileCV.notify_one();
 }
 
-static void compileThreadFunc();
-
-static void startCompileThread() {
-	compileThread = new std::thread(compileThreadFunc);
-	compileThread->detach();
-}
 
 static bool quitCompileThread = false;
 
@@ -402,7 +405,15 @@ struct Shader {
 	void Dispatch(int x, int y, int z);
 };
 
+struct ComputeBuffer {
+	ComputeBuffer(int id);
+	~ComputeBuffer();
+
+	int id;
+};
+
 static Shader* findComputeShader(int id);
+static ComputeBuffer* findComputeBuffer(int id);
 
 #endif
 
@@ -1891,15 +1902,34 @@ void Shader::SetSource(const char* source, const char* entryPoint) {
 	submitCompileTasks(vector<CompileTask> { task }, true);
 }
 
+ComputeBuffer::ComputeBuffer(int id_)
+	: id(id_)
+{}
+
+ComputeBuffer::~ComputeBuffer() {
+	id = -1;
+}
+
 
 std::map<int, Shader*> computeShaders;
+std::map<int, ComputeBuffer*> computeBuffers;
 
 int nextComputeShaderId = 0;
+int nextComputeBufferId = 0;
 
 static Shader* findComputeShader(int id) {
 	auto iter = computeShaders.find(id);
 	if (iter == computeShaders.end()) {
 		DebugSS("no compute shader for id " << id);
+		return nullptr;
+	}
+	return iter->second;
+}
+
+static ComputeBuffer* findComputeBuffer(int id) {
+	auto iter = computeBuffers.find(id);
+	if (iter == computeBuffers.end()) {
+		DebugSS("no compute buffer for id " << id);
 		return nullptr;
 	}
 	return iter->second;
@@ -2032,7 +2062,7 @@ UNITY_INTERFACE_EXPORT void SetVectorArray(const char* name, float* value, int n
 UNITY_INTERFACE_EXPORT void SetFloat(const char* name, float value) {
     setproparray(name, PropType::Float, __func__, &value, 1);
 }
-    
+
 
 UNITY_INTERFACE_EXPORT void SetMatrix(const char* name, float* value) {
     setproparray(name, PropType::Matrix, __func__, value, 16);
@@ -2136,7 +2166,7 @@ UNITY_INTERFACE_EXPORT float GetFloat(const char* name) {
 	if (!prop) return 0.0f;
 	return *((float*)(constantBuffer + prop->offset));
 }
-    
+
 UNITY_INTERFACE_EXPORT bool HasProperty(const char* name) { return hasProp(name); }
 UNITY_INTERFACE_EXPORT void Reset() { didInit = false; }
 UNITY_INTERFACE_EXPORT void PrintUniforms() { printUniforms(); }
@@ -2207,7 +2237,6 @@ UNITY_INTERFACE_EXPORT void Dispatch(int id, int ThreadGroupCountX, int ThreadGr
 	auto computeShader = findComputeShader(id);
 	if (computeShader)
 		computeShader->Dispatch(ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ);
-
 }
 
 UNITY_INTERFACE_EXPORT void SetComputeShaderSource(int id, const char* src, const char* entryPoint) {
@@ -2215,9 +2244,18 @@ UNITY_INTERFACE_EXPORT void SetComputeShaderSource(int id, const char* src, cons
 		Debug("must give a non-null src and entryPoint");
 		return;
 	}
+
 	auto computeShader = findComputeShader(id);
 	if (computeShader)
 		computeShader->SetSource(src, entryPoint);
+}
+
+UNITY_INTERFACE_EXPORT void DestroyComputeBuffer(int id) {
+	auto computeBuffer = findComputeBuffer(id);
+	if (computeBuffer) {
+		computeBuffers.erase(id);
+		delete computeBuffer;
+	}
 }
 
 UNITY_INTERFACE_EXPORT void DestroyComputeShader(int id) {
