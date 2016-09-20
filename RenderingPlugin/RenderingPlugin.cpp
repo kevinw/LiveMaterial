@@ -685,7 +685,14 @@ void CompileTask::operator()() {
 		flags |= D3DCOMPILE_DEBUG;
 	}
 
+
 	auto profile = profileNameForShaderType(shaderType);
+	if (!profile) return;
+
+	if (src.empty() || srcName.empty() || entryPoint.empty()) {
+		Debug("empty src or srcName or entryPoint");
+		return;
+	}
 
 	StopWatch d3dCompileWatch;
 	auto hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error, flags);
