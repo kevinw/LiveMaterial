@@ -705,11 +705,11 @@ void CompileTask::operator()() {
 		if (!shaderCompilerOutputs.write(output)) {
 			Debug("Shader compiler output queue is full");
 		} else {
+			// TODO: not necessary in release builds
 			GUARD_CALLBACK;
 			if (PluginCallbackFunc)
 				PluginCallbackFunc(NeedsSceneViewRepaint);
 		}
-
 	}
 	if (error)
 		error->Release();
