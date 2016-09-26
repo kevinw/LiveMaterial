@@ -39,7 +39,6 @@ static bool writeDebugFiles = false;
 static bool shaderDebugging = false;
 static int optimizationLevel = 3;
 
-#ifdef SUPPORT_D3D
 static std::thread* compileThread;
 
 static void compileThreadFunc();
@@ -117,7 +116,6 @@ static void compileThreadFunc() {
 	}
 }
 
-#endif
 
 static mutex uniformMutex;
 #define GUARD_UNIFORMS lock_guard<mutex> _lock_guard_uniforms(uniformMutex)
@@ -390,6 +388,8 @@ const char* getGLTypeName(GLenum typeEnum) {
 static vector<ID3D11ShaderResourceView*> resourceViews;
 static vector<std::pair<ID3D11Resource*, size_t> > pendingResources;
 static std::map<string, size_t> resourceViewIndexes;
+#endif
+
 
 struct Shader {
 	Shader(int id);
@@ -398,9 +398,14 @@ struct Shader {
 	int id;
 	string source;
 	string entryPoint;
+#ifdef SUPPORT_D3D
 	ID3D11ComputeShader* d3d11ComputeShader;
 
 	bool IsReady() const { return this->d3d11ComputeShader != nullptr; }
+#else
+    bool IsReady() const { return false; }
+#endif
+    
 	void SetSource(const char* source, const char* entryPoint);
 	void Dispatch(int x, int y, int z);
 };
@@ -415,7 +420,6 @@ struct ComputeBuffer {
 static Shader* findComputeShader(int id);
 static ComputeBuffer* findComputeBuffer(int id);
 
-#endif
 
 #if SUPPORT_OPENGL_UNIFIED
 static vector<GLint> textureIDs;
@@ -634,31 +638,35 @@ struct Stats {
 static Stats stats = {};
 
 #if SUPPORT_D3D11
+static const char* profileNameForShaderType(ShaderType shaderType) {
+    switch (shaderType) {
+        case Fragment: return "ps_5_0";
+        case Vertex: return "vs_5_0";
+        case Compute: return "cs_5_0";
+        default:
+            assert(false);
+            return nullptr;
+    }
+}
+
+static void constantBufferReflect(ID3DBlob*);
+HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob, UINT flags);
+#endif
 
 
 struct CompileTaskOutput {
 	ShaderType shaderType;
+#if SUPPORT_D3D11
 	ID3DBlob* shaderBlob;
+#endif
 	int shaderId;
 };
 
 folly::ProducerConsumerQueue<CompileTaskOutput> shaderCompilerOutputs(10);
-HRESULT CompileShader(_In_ const char* src, _In_ LPCSTR srcName, _In_ LPCSTR entryPoint, _In_ LPCSTR profile, const D3D_SHADER_MACRO defines[], _Outptr_ ID3DBlob** blob, _Outptr_ ID3DBlob** errorBlob, UINT flags);
 
-static void constantBufferReflect(ID3DBlob*);
-
-static const char* profileNameForShaderType(ShaderType shaderType) {
-	switch (shaderType) {
-	case Fragment: return "ps_5_0";
-	case Vertex: return "vs_5_0";
-	case Compute: return "cs_5_0";
-	default:
-		assert(false);
-		return nullptr;
-	}
-}
 
 void CompileTask::operator()() {
+#if SUPPORT_D3D11
 	const D3D_SHADER_MACRO defines[] = {
 		"LIVE_MATERIAL", "1",
 		NULL, NULL
@@ -720,9 +728,10 @@ void CompileTask::operator()() {
 	}
 	if (error)
 		error->Release();
+#endif
+
 }
 
-#endif
 
 static void MaybeCompileNewShaders();
 static void MaybeLoadNewShaders();
@@ -1856,17 +1865,22 @@ static void setupPendingResourcesD3D11(ID3D11DeviceContext* ctx) {
 		samplers.push_back(g_D3D11SamplerState);
 	ctx->PSSetSamplers(0, numSamplers, &samplers[0]);
 }
+#endif
 
 Shader::Shader(int id_)
 	: id(id_)
+#if SUPPORT_D3D11
 	, d3d11ComputeShader(nullptr)
+#endif
 {}
 
 Shader::~Shader() {
 	source = "";
 	entryPoint = "";
 	id = -1;
+#if SUPPORT_D3D11
 	SAFE_RELEASE(d3d11ComputeShader);
+#endif
 }
 
 void Shader::Dispatch(int threadGroupCountX, int threadGroupCountY, int threadGroupCountZ) {
@@ -1874,6 +1888,9 @@ void Shader::Dispatch(int threadGroupCountX, int threadGroupCountY, int threadGr
 		DebugSS("ComputeShader not IsReady(), cannot dispatch");
 		return;
 	}
+    
+#if SUPPORT_D3D
+    
 
 	ID3D11DeviceContext* ctx = nullptr;
 	g_D3D11Device->GetImmediateContext(&ctx);
@@ -1896,6 +1913,7 @@ void Shader::Dispatch(int threadGroupCountX, int threadGroupCountY, int threadGr
     ctx->CSSetShaderResources(0, 2, ppSRVNULL);
 
 	ctx->Release();
+#endif
 }
 
 void Shader::SetSource(const char* source, const char* entryPoint) {
@@ -1941,7 +1959,6 @@ static ComputeBuffer* findComputeBuffer(int id) {
 	}
 	return iter->second;
 }
-#endif
 
 #if SUPPORT_OPENGL_UNIFIED || SUPPORT_OPENGL_CORE
 static void updateUniformsGL() {

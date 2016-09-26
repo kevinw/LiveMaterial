@@ -55,6 +55,10 @@ enum PluginMessage {
 	NeedsSceneViewRepaint
 };
 
+#ifndef WIN32
+#define _stdcall __attribute__((stdcall))
+#endif
+
 typedef void(_stdcall*PluginCallback)(PluginMessage mssage);
 
 
