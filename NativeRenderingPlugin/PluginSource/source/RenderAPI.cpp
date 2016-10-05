@@ -27,50 +27,54 @@ void LiveMaterial::SubmitUniforms(int uniformIndex) {
 		memcpy(_gpuBuffer + _constantBufferSize * uniformIndex, _constantBuffer, _constantBufferSize);
 }
 
-void LiveMaterial::setproparray(const char* name, PropType type, const char* methodName, float* value, int numFloats) {
+void LiveMaterial::setproparray(const char* name, PropType type, float* value, int numFloats) {
     lock_guard<mutex> guard(uniformsMutex);
 
-    if (!_constantBuffer)
-		return;
+    if (!_constantBuffer) return;
 
     auto prop = propForName(name, type);
-    if (!prop)
-		return;
+    if (!prop) return;
     
 	size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, prop->size * prop->arraySize);
 	memcpy(_constantBuffer + prop->offset, value, bytesToCopy);
 }
 
-void LiveMaterial::Draw(int uniformIndex)
-{
+void LiveMaterial::getproparray(const char* name, PropType type, float* value, int numFloats) {
+    lock_guard<mutex> guard(uniformsMutex);
+
+    if (!_constantBuffer) return;
+
+    auto prop = propForName(name, type);
+    if (!prop) return;
+    
+	size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, prop->size * prop->arraySize);
+	memcpy(value, _constantBuffer + prop->offset, bytesToCopy);
 }
 
-void LiveMaterial::SetFloat(const char * name, float value)
-{
+void LiveMaterial::Draw(int uniformIndex) { }
+
+void LiveMaterial::SetFloat(const char * name, float value) { setproparray(name, PropType::Float, &value, 1); }
+void LiveMaterial::SetVector4(const char * name, float* value) { setproparray(name, PropType::Vector4, value, 4); }
+void LiveMaterial::SetMatrix(const char * name, float * value) { setproparray(name, PropType::Matrix, value, 16); }
+
+void LiveMaterial::SetFloatArray(const char * name, float * value, int numFloats) {
+	setproparray(name, PropType::FloatBlock, value, numFloats);
 }
 
-void LiveMaterial::SetVector4(const char * name, float* value) {
-    setproparray(name, PropType::Vector4, __func__, value, 4);
-}
-
-void LiveMaterial::SetMatrix(const char * name, float * value)
-{
-}
-
-float LiveMaterial::GetFloat(const char * name)
-{
-	return 0.0f;
-}
+void LiveMaterial::GetFloat(const char * name, float* value) { getproparray(name, PropType::Float, value, 1); }
+void LiveMaterial::GetVector4(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 4); }
+void LiveMaterial::GetMatrix(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 16); }
 
 static ShaderProp* _lookupPropByName(const PropMap& props, const char* name) {
 	auto i = props.find(name);
 	return i != props.end() ? i->second : nullptr;
 }
 
-
 ShaderProp * LiveMaterial::propForNameSizeOffset(const char * name, uint16_t size, uint16_t offset) {
 	auto prop = _lookupPropByName(shaderProps, name);
 	if (!prop || prop->size != size || prop->offset != offset) {
+		if (prop)
+			DebugSS("WARNING: deleting prop named " << prop->name);
 		SAFE_DELETE(prop);
 		auto type = ShaderProp::typeForSize(size);
 		int arraySize = 1;
@@ -95,7 +99,9 @@ ShaderProp * LiveMaterial::propForNameSizeOffset(const char * name, uint16_t siz
 ShaderProp * LiveMaterial::propForName(const char * name, PropType type)
 {
 	auto prop = _lookupPropByName(shaderProps, name);
-	if (!prop || (prop->type != type && prop->type != PropType::FloatBlock)) {
+	if (!prop || (prop->type != type && type != PropType::FloatBlock)) {
+		if (prop)
+			DebugSS("WARNING: deleting prop named " << prop->name);
 		SAFE_DELETE(prop);
 		prop = shaderProps[name] = new ShaderProp(type, name);
 	}
@@ -149,7 +155,14 @@ void LiveMaterial::ensureConstantBufferSize(size_t size, PropMap* oldProps, Prop
 
 LiveMaterial* RenderAPI::CreateLiveMaterial() {
 	lock_guard<mutex> guard(materialsMutex);
-	auto id = ++liveMaterialCount;
+	++liveMaterialCount;
+
+	// Wrap around at 16 bits; the C# side packs the LiveMaterial's id
+	// into half an int when rendering (the other half is the uniform index).
+	if (liveMaterialCount > std::numeric_limits<int16_t>::max())
+		liveMaterialCount = 0;
+
+	auto id = liveMaterialCount;
 	assert(id > 0);
 	auto liveMaterial = _newLiveMaterial(id);
 	assert(liveMaterials.find(id) == liveMaterials.end());

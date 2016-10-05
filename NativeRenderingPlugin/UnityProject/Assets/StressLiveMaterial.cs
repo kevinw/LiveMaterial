@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using UnityEngine.Assertions;
 using System.Collections;
 
 public class StressLiveMaterial : MonoBehaviour {
@@ -43,12 +44,23 @@ struct FragInput {
 };
 
 float4 color;
+float floatVal;
+float4 vectorVal;
+float4 vectors[50];
 
 FragOutput fragSimple(FragInput fragInput) {
 	// test uv inputs
 	FragOutput output;
-	output.color = float4(fragInput.uv.x, fragInput.uv.y, 1, 1);
-    if (fragInput.uv.x > 0.25 && fragInput.uv.x < .75 &&
+    float2 uv = fragInput.uv;
+	output.color = float4(uv.x, uv.y, 1, 1);
+
+    for (int i = 0; i < 50; ++i) {
+        float2 pos = vectors[i].xy;
+        if (length(pos - uv) < 0.05)
+            output.color = color;
+    }
+
+    if (fragInput.uv.x > floatVal && fragInput.uv.x < vectorVal.x &&
         fragInput.uv.y > 0.25 && fragInput.uv.y < .75) {
         output.color = color;
     }
@@ -78,7 +90,30 @@ FragOutput fragSimple(FragInput fragInput) {
             yield return null; // wait for live materials to register
 
             for (int i = 0; i < liveMaterials.Length; ++i) {
-                liveMaterials[i].SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry);
+                var m = liveMaterials[i];
+                m.SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry);
+            }
+
+            yield return new WaitForSeconds(delay);
+
+            for (int i = 0; i < liveMaterials.Length; ++i) {
+                var m = liveMaterials[i];
+                var color = new Color(Random.Range(0, 1f), Random.Range(0, 1f), Random.Range(0, 1f), 1.0f);
+                m.SetColor("color", color);
+                Assert.AreEqual(color, m.GetColor("color"));
+
+                var floatVal = Random.Range(0, 0.4f);
+                m.SetFloat("floatVal", floatVal);
+                Assert.AreEqual(floatVal, m.GetFloat("floatVal"));
+
+                Vector4 vec4Val = Random.insideUnitSphere;
+                m.SetVector4("vectorVal", vec4Val);
+                Assert.AreEqual(vec4Val, m.GetVector4("vectorVal"));
+
+                Vector4[] vectors = new Vector4[50];
+                for (int j = 0; j < vectors.Length; ++j)
+                    vectors[j] = Random.insideUnitCircle;
+                m.SetVectorArray("vectors", vectors);
             }
 
             yield return new WaitForSeconds(delay);

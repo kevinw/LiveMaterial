@@ -69,14 +69,18 @@ public:
 	virtual ~LiveMaterial() {}
 	int id() const { return _id; }
 
+	void GetFloat(const char* name, float* value);
+	void GetVector4(const char* name, float* value);
+	void GetMatrix(const char* name, float* value);
 	void SetFloat(const char* name, float value);
 	void SetVector4(const char* name, float* value);
 	void SetMatrix(const char* name, float* value);
+	void SetFloatArray(const char* name, float* value, int numFloats);
 	void SubmitUniforms(int uniformsIndex);
-	void setproparray(const char* name, PropType type, const char* methodName, float* value, int numFloats);
+	void setproparray(const char* name, PropType type, float* value, int numFloats);
+	void getproparray(const char* name, PropType type, float* value, int numFloats);
 	virtual void Draw(int uniformIndex);
 
-	float GetFloat(const char* name);
 
 	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
 	void SetComputeSource(const char* source, const char* entryPoint);

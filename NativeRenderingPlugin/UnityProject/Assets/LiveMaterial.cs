@@ -23,7 +23,13 @@ public class LiveMaterial : MonoBehaviour
         internal static extern int GetLiveMaterialId(IntPtr nativePtr);
         [DllImport(PluginName)] internal static extern void DestroyLiveMaterial(IntPtr nativePtr);
         [DllImport(PluginName)] internal static extern void SetShaderSource(IntPtr nativePtr, string fragSrc, string fragEntry, string vertSrc, string vertEntry);
-        [DllImport(PluginName)] internal static extern void SetVector4(IntPtr nativePtr, string name, Vector4 value);
+        [DllImport(PluginName)] internal static extern void SetVector4(IntPtr nativePtr, string name, float[] value);
+        [DllImport(PluginName)] internal static extern void SetFloatArray(IntPtr nativePtr, string name, float[] value, int numFloats);
+        [DllImport(PluginName)] internal static extern void SetMatrix(IntPtr nativePtr, string name, float[] value);
+        [DllImport(PluginName)] internal static extern void SetFloat(IntPtr nativePtr, string name, float value);
+        [DllImport(PluginName)] internal static extern float GetFloat(IntPtr nativePtr, string name);
+        [DllImport(PluginName)] internal static extern void GetVector4(IntPtr nativePtr, string name, float[] value);
+        [DllImport(PluginName)] internal static extern void GetMatrix(IntPtr nativePtr, string name, float[] value);
         [DllImport(PluginName)] internal static extern void SubmitUniforms(IntPtr nativePtr, int uniformsIndex);
     }
 
@@ -52,9 +58,68 @@ public class LiveMaterial : MonoBehaviour
         }
     }
 
+    static float[] scratch = new float[16];
+    static float[] arrayScratch;
+    static void ensureArrayScratch(int numFloats) {
+        if (arrayScratch == null || arrayScratch.Length < numFloats)
+            arrayScratch = new float[numFloats];
+    }
+
     public void SetShaderSource(string fragSrc, string fragEntry, string vertSrc, string vertEntry) { Native.SetShaderSource(NativePtr, fragSrc, fragEntry, vertSrc, vertEntry); }
     public void SetColor(string name, Color color) { SetVector4(name, color); }
-    public void SetVector4(string name, Vector4 vector) { Native.SetVector4(NativePtr, name, vector); }
+    public void SetFloat(string name, float value) { Native.SetFloat(NativePtr, name, value);  }
+    public void SetVectorArray(string name, Vector4[] values) {
+        int numFloats = values.Length * 4;
+        ensureArrayScratch(numFloats);
+        int z = 0;
+        for (int i = 0; i < values.Length; ++i) {
+            arrayScratch[z++] = values[i].x;
+            arrayScratch[z++] = values[i].y;
+            arrayScratch[z++] = values[i].z;
+            arrayScratch[z++] = values[i].w;
+        }
+        Assert.AreEqual(numFloats, z);
+        Native.SetFloatArray(NativePtr, name, arrayScratch, numFloats);
+    }
+    public void SetMatrixArray(string name, Matrix4x4[] values) {
+        int numFloats = values.Length * 16;
+        ensureArrayScratch(numFloats);
+        int z = 0;
+        for (int i = 0; i < values.Length; ++i)
+            for (int j = 0; j < 16; ++j)
+                arrayScratch[z++] = values[i][j];
+        Assert.AreEqual(numFloats, z);
+        Native.SetFloatArray(NativePtr, name, arrayScratch, numFloats);
+    }
+    public void SetVector4(string name, Vector4 vector) {
+        scratch[0] = vector.x;
+        scratch[1] = vector.y;
+        scratch[2] = vector.z;
+        scratch[3] = vector.w;
+        Native.SetVector4(NativePtr, name, scratch);
+    }
+    public void SetMatrix(string name, Matrix4x4 matrix) {
+        for (int i = 0; i < 16; ++i)
+            scratch[i] = matrix[i];
+        Native.SetMatrix(NativePtr, name, scratch);
+    }
+    
+    public Vector4 GetVector4(string name) {
+        Native.GetVector4(NativePtr, name, scratch);
+        return new Vector4(scratch[0], scratch[1], scratch[2], scratch[3]);
+    }
+
+    public float GetFloat(string name) { return Native.GetFloat(NativePtr, name);  }
+    public Color GetColor(string name) { return GetVector4(name); }
+
+    public Matrix4x4 GetMatrix(string name) {
+        Native.GetMatrix(NativePtr, name, scratch);
+        var m = new Matrix4x4();
+        for (int j = 0; j < 16; ++j)
+            m[j] = scratch[j];
+        return m;
+    }
+
     public void SubmitUniforms(int uniformsIndex) { Native.SubmitUniforms(NativePtr, uniformsIndex); }
 
 #if UNITY_EDITOR
@@ -114,10 +179,6 @@ public class LiveMaterial : MonoBehaviour
                 Int16 id = (Int16)NativeId;
                 Int16 uniformsIndex = 0;
                 Int32 packedValue = (id << 16) | (uniformsIndex & 0xffff);
-
-
-                var color = new Color(Random.Range(0, 1f), Random.Range(0, 1f), Random.Range(0, 1f), 1.0f);
-                SetColor("color", color);
 
                 SubmitUniforms(0);
                 GL.IssuePluginEvent(Native.GetRenderEventFunc(), packedValue);
