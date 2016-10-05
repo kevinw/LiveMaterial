@@ -22,6 +22,8 @@ using std::stringstream;
 
 struct IUnityInterfaces;
 
+#define MAX_GPU_BUFFERS 4
+
 extern mutex debugLogMutex;
 typedef void(*DebugLogFuncPtr)(const char *);
 DebugLogFuncPtr GetDebugFunc();
@@ -44,6 +46,7 @@ class RenderAPI;
 class LiveMaterial;
 
 enum ShaderType { Vertex, Fragment, Compute };
+const char* shaderTypeName(ShaderType shaderType);
 
 #ifndef SAFE_DELETE
 #define SAFE_DELETE(a) if (a) { delete a; a = nullptr; }
@@ -55,6 +58,7 @@ struct CompileTask {
 	string filename;
 	string entryPoint;
 	LiveMaterial* liveMaterial;
+	int id;
 };
 
 typedef map<string, ShaderProp*> PropMap;
@@ -106,6 +110,7 @@ public:
 	void runCompileFunc();
 	virtual ~RenderAPI() { }
 
+	virtual void DrawMaterials(int uniformIndex);
 
 	// Process general event like initialization, shutdown, device loss/reset etc.
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces) = 0;
@@ -135,10 +140,10 @@ public:
 
 	void QueueCompileTasks(vector<CompileTask> tasks);
 
-
 protected:
 	virtual bool compileShader(CompileTask compileTask);
 
+	mutex materialsMutex;
 	int liveMaterialCount = 0;
 	map<int, LiveMaterial*> liveMaterials;
 

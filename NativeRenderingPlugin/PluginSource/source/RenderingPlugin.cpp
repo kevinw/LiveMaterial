@@ -9,9 +9,11 @@
 
 
 mutex debugLogMutex;
-
 static DebugLogFuncPtr s_debugLogFunc = nullptr;
 DebugLogFuncPtr GetDebugFunc() { return s_debugLogFunc; }
+
+static string s_shaderIncludePath;
+string GetShaderIncludePath() { return s_shaderIncludePath; }
 
 
 // --------------------------------------------------------------------------
@@ -114,10 +116,6 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 
 
 
-static string s_shaderIncludePath;
-
-string GetShaderIncludePath() { return s_shaderIncludePath; }
-
 extern "C" {
 #define UNITY_FUNC UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
 
@@ -125,7 +123,6 @@ extern "C" {
 		assert(s_CurrentAPI);
 		return s_CurrentAPI->CreateLiveMaterial()->id();
 	}
-
 
 	void UNITY_FUNC DestroyLiveMaterial(int id) {
 		assert(s_CurrentAPI);
@@ -163,7 +160,7 @@ extern "C" {
 	void UNITY_FUNC SetShaderIncludePath(const char* includePath) { s_shaderIncludePath = includePath; }
 }
 
-static void DrawColoredTriangle()
+static void DrawColoredTriangle(int uniformIndex)
 {
 	// Draw a colored triangle. Note that colors will come out differently
 	// in D3D and OpenGL, for example, since they expect color bytes
@@ -192,6 +189,7 @@ static void DrawColoredTriangle()
 	};
 
 	s_CurrentAPI->DrawSimpleTriangles(worldMatrix, 1, verts);
+	s_CurrentAPI->DrawMaterials(uniformIndex);
 }
 
 
@@ -242,13 +240,13 @@ static void ModifyTexturePixels()
 }
 
 
-static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
+static void UNITY_INTERFACE_API OnRenderEvent(int uniformIndex)
 {
 	// Unknown / unsupported graphics device type? Do nothing
 	if (s_CurrentAPI == NULL)
 		return;
 
-	DrawColoredTriangle();
+	DrawColoredTriangle(uniformIndex);
 	ModifyTexturePixels();
 }
 

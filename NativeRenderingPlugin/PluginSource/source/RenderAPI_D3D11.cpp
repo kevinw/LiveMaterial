@@ -35,6 +35,7 @@ struct CompileOutput {
 	ShaderType shaderType;
 	ID3DBlob *shaderBlob;
 	LiveMaterial* liveMaterial;
+	int inputId;
 };
 
 class LiveMaterial_D3D11 : public LiveMaterial
@@ -48,8 +49,8 @@ public:
 		SAFE_RELEASE(_pixelShader);
 		SAFE_RELEASE(_vertexShader);
 		SAFE_RELEASE(_computeShader);
-
 		SAFE_RELEASE(_deviceConstantBuffer);
+		SAFE_RELEASE(_samplerState);
 
 		for (size_t i = 0; i < resourceViews.size(); ++i) {
 			SAFE_RELEASE(resourceViews[i]);
@@ -59,11 +60,30 @@ public:
 		// TODO: release pendingResources
 	}
 
+	void DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
+
 	void updateD3D11Shader(CompileOutput output);
 	void constantBufferReflect(ID3DBlob* shaderBlob);
 
 protected:
 	ID3D11Device* device() const;
+
+	ID3D11SamplerState* samplerState() {
+		if (!_samplerState) {
+			D3D11_SAMPLER_DESC samplerDesc;
+			memset(&samplerDesc, 0, sizeof(samplerDesc));
+			samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+			samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+			samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+			DX_CHECK(device()->CreateSamplerState(&samplerDesc, &_samplerState));
+		}
+
+		return _samplerState;
+	}
+
+	void setupPendingResources(ID3D11DeviceContext* ctx);
+	void updateUniforms(ID3D11DeviceContext* ctx, int uniformIndex);
 
 	// Uniforms
 	ID3D11Buffer* _deviceConstantBuffer = nullptr;
@@ -72,6 +92,7 @@ protected:
 	ID3D11PixelShader* _pixelShader = nullptr;
 	ID3D11VertexShader* _vertexShader = nullptr;
 	ID3D11ComputeShader* _computeShader = nullptr;
+	ID3D11SamplerState* _samplerState = nullptr;
 
 	// Resource Views (textures)
 	mutex resourceViewsMutex;
@@ -143,7 +164,9 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 	}
 
 	{
-		lock_guard<mutex> guard(uniformsMutex);
+		lock_guard<mutex> uniformsGuard(uniformsMutex);
+		lock_guard<mutex> gpuGuard(gpuMutex);
+
 		SAFE_RELEASE(_deviceConstantBuffer);
 		auto oldProps = shaderProps;
 		shaderProps.clear();
@@ -183,7 +206,6 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 			}
 		}
 
-		lock_guard<mutex> gpuGuard(gpuMutex);
 		ensureConstantBufferSize(_deviceConstantBufferSize, &oldProps, &shaderProps);
 	}
 
@@ -192,13 +214,11 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 
 void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 {
-	auto shaderBlob = output.shaderBlob;
-	assert(shaderBlob);
+	assert(output.shaderBlob);
+	constantBufferReflect(output.shaderBlob);
 
-	constantBufferReflect(shaderBlob);
-
-	auto buf = shaderBlob->GetBufferPointer();
-	auto bufSize = shaderBlob->GetBufferSize();
+	auto buf = output.shaderBlob->GetBufferPointer();
+	auto bufSize = output.shaderBlob->GetBufferSize();
 	assert(buf && bufSize > 0);
 
 	switch (output.shaderType) {
@@ -211,12 +231,16 @@ void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 			SAFE_RELEASE(_pixelShader);
 			_pixelShader = newPixelShader;
 		}
+		break;
 	}
 	case Vertex: {
 		ID3D11VertexShader* newVertexShader = nullptr;
 		HRESULT hr = device()->CreateVertexShader(buf, bufSize, nullptr, &newVertexShader);
 		if (FAILED(hr)) {
-			Debug("CreateVertexShader failed"); DebugHR(hr);
+			DebugHR(hr);
+			DebugSS("CreateVertexShader failed:" << 
+				"\n\n inputId: " << output.inputId <<
+				"\n\n shaderType: " << shaderTypeName(output.shaderType));
 		} else {
 			SAFE_RELEASE(_vertexShader);
 			_vertexShader = newVertexShader;
@@ -246,11 +270,16 @@ class RenderAPI_D3D11 : public RenderAPI
 {
 public:
 	RenderAPI_D3D11();
-	virtual ~RenderAPI_D3D11() { }
+	virtual ~RenderAPI_D3D11() {
+		lock_guard<mutex> guard(compileOutputMutex);
+		compileOutput.clear();
+	}
 
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces);
 
 	virtual void DrawSimpleTriangles(const float worldMatrix[16], int triangleCount, const void* verticesFloat3Byte4);
+
+	virtual void DrawMaterials(int uniformIndex);
 
 	virtual void* BeginModifyTexture(void* textureHandle, int textureWidth, int textureHeight, int* outRowPitch);
 	virtual void EndModifyTexture(void* textureHandle, int textureWidth, int textureHeight, int rowPitch, void* dataPtr);
@@ -354,6 +383,7 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 			output.liveMaterial = task.liveMaterial;
 			output.shaderType = task.shaderType;
 			output.shaderBlob = shaderBlob;
+			output.inputId = task.id;
 			compileOutput.push_back(output);
 		}
 
@@ -550,7 +580,8 @@ void RenderAPI_D3D11::DrawSimpleTriangles(const float worldMatrix[16], int trian
 		for (size_t i = 0; i < compileOutput.size(); ++i) {
 			auto output = compileOutput[i];
 			assert(output.liveMaterial);
-			((LiveMaterial_D3D11*)(output.liveMaterial))->updateD3D11Shader(output);
+			auto liveMaterial = (LiveMaterial_D3D11*)output.liveMaterial;
+			liveMaterial->updateD3D11Shader(output);
 		}
 		compileOutput.clear();
 	}
@@ -607,10 +638,87 @@ void RenderAPI_D3D11::EndModifyTexture(void* textureHandle, int textureWidth, in
 	ctx->Release();
 }
 
+void RenderAPI_D3D11::DrawMaterials(int uniformIndex) {
+	ID3D11DeviceContext* ctx = NULL;
+	D3D11Device()->GetImmediateContext (&ctx);
+	if (ctx) {
+		lock_guard<mutex> guard(materialsMutex);
+		for (auto iter = liveMaterials.begin(); iter != liveMaterials.end(); ++iter) {
+			auto liveMaterial = iter->second;
+			((LiveMaterial_D3D11*)liveMaterial)->DrawD3D11(ctx, uniformIndex);
+		}
+	}
+	ctx->Release();
+}
 
 ID3D11Device* LiveMaterial_D3D11::device() const {
 	return ((RenderAPI_D3D11*)_renderAPI)->D3D11Device();
 }
+
+void LiveMaterial_D3D11::setupPendingResources(ID3D11DeviceContext* ctx) {
+	lock_guard<mutex> guard(resourceViewsMutex);
+
+	for (size_t i = 0; i < pendingResources.size(); ++i) {
+		auto resource = pendingResources[i].first;
+		auto index = pendingResources[i].second;
+
+		auto resourceView = resourceViews[index];
+
+		if (resourceView != nullptr) {
+			SAFE_RELEASE(resourceView);
+			resourceView = nullptr;
+		}
+
+		if (resource) {
+			HRESULT hr = device()->CreateShaderResourceView(resource, nullptr, &resourceView);
+			if (FAILED(hr)) {
+				Debug("Could not CreateShaderResourceView");
+				DebugHR(hr);
+				resourceView = nullptr;
+			}
+
+			SAFE_RELEASE(resource);
+		}
+
+		resourceViews[index] = resourceView;
+	}
+
+	pendingResources.clear();
+
+	ctx->PSSetShaderResources(0, (UINT)resourceViews.size(), &resourceViews[0]);
+
+	// TODO: is the number of samplers equal to the number of resource views? no idea
+	vector<ID3D11SamplerState*> samplers;
+	auto sampler = samplerState();
+	assert(sampler);
+	const UINT numSamplers = (UINT)resourceViews.size();
+	for (UINT i = 0; i < numSamplers; ++i)
+		samplers.push_back(sampler);
+	ctx->PSSetSamplers(0, numSamplers, &samplers[0]);
+}
+
+void LiveMaterial_D3D11::updateUniforms(ID3D11DeviceContext* ctx, int uniformIndex) {
+	lock_guard<mutex> uniformsGuard(uniformsMutex);
+	lock_guard<mutex> gpuGuard(gpuMutex);
+
+	assert(uniformIndex < MAX_GPU_BUFFERS);
+	if (_deviceConstantBuffer && _deviceConstantBufferSize > 0) {
+		ctx->UpdateSubresource(_deviceConstantBuffer, 0, 0, _gpuBuffer + _constantBufferSize * uniformIndex, 0, 0);
+	}
+}
+
+void LiveMaterial_D3D11::DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex) {
+	if (_pixelShader && _vertexShader) {
+		setupPendingResources(ctx);
+		updateUniforms(ctx, uniformIndex);	
+		ctx->VSSetShader (_vertexShader, NULL, 0);		
+		ctx->PSSetShader (_pixelShader, NULL, 0);
+		ctx->PSSetConstantBuffers(0, 1, &_deviceConstantBuffer);
+		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+		ctx->Draw(4, 0);
+	}
+}
+
 
 
 #endif // #if SUPPORT_D3D11

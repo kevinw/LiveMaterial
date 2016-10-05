@@ -23,10 +23,21 @@ public class LiveMaterial : MonoBehaviour
     private static void DebugWrapper(string log) { Debug.Log(log); }
     static readonly DebugLogFunc debugLogFunc = new DebugLogFunc(DebugWrapper);
 
-    public int _nativeId = -1;
+    const int ID_UNSET = -1;
+    const int ID_DESTROYED = -2;
+
+    public int _nativeId = ID_UNSET;
+
+    public int NativeId {
+        get {
+            if (_nativeId == ID_UNSET)
+                _nativeId = Native.CreateLiveMaterial();
+            return _nativeId;
+        }
+    }
 
     public void SetShaderSource(string fragSrc, string fragEntry, string vertSrc, string vertEntry) {
-        Native.SetShaderSource(_nativeId, fragSrc, fragEntry, vertSrc, vertEntry);
+        Native.SetShaderSource(NativeId, fragSrc, fragEntry, vertSrc, vertEntry);
     }
 
 #if UNITY_EDITOR
@@ -34,8 +45,6 @@ public class LiveMaterial : MonoBehaviour
 #endif
 
     void Awake() {
-        _nativeId = Native.CreateLiveMaterial();
-
 #if UNITY_EDITOR
         if (!didInit) {
             // for reattaching plugin functions when unity reloads scripts
@@ -59,8 +68,10 @@ public class LiveMaterial : MonoBehaviour
 	}
 
     void OnDestroy() {
-        Native.DestroyLiveMaterial(_nativeId);
-        _nativeId = -1;
+        if (_nativeId != ID_UNSET && _nativeId != ID_DESTROYED) {
+            Native.DestroyLiveMaterial(_nativeId);
+            _nativeId = ID_DESTROYED;
+        }
     }
 
 	private void CreateTextureAndPassToPlugin() {

@@ -4,6 +4,16 @@
 
 #include <assert.h>
 
+const char* shaderTypeName(ShaderType shaderType) {
+	switch (shaderType) {
+	case Vertex: return "Vertex";
+	case Fragment: return "Fragment";
+	case Compute: return "Compute";
+	default: assert(false);
+	}
+	return nullptr;
+}
+
 LiveMaterial::LiveMaterial(RenderAPI* renderAPI, int id)
 	: _renderAPI(renderAPI)
 	, _id(id)
@@ -80,7 +90,6 @@ static void copyProps(PropMap* oldProps, PropMap* newProps, unsigned char* oldBu
 	}	
 }
 
-#define MAX_GPU_BUFFERS 4
 
 void LiveMaterial::ensureConstantBufferSize(size_t size, PropMap* oldProps, PropMap* newProps) {
 	// must have GUARD_UNIFORMS and GUARD_GPU
@@ -109,6 +118,7 @@ void LiveMaterial::ensureConstantBufferSize(size_t size, PropMap* oldProps, Prop
 }
 
 LiveMaterial* RenderAPI::CreateLiveMaterial() {
+	lock_guard<mutex> guard(materialsMutex);
 	auto id = ++liveMaterialCount;
 	assert(id > 0);
 	auto liveMaterial = _newLiveMaterial(id);
@@ -121,6 +131,8 @@ LiveMaterial* RenderAPI::_newLiveMaterial(int id) {
 	assert(false);
 	return nullptr;
 }
+
+static int inputId = 0;
 
 void LiveMaterial::SetShaderSource(
 	const char* fragSrc, const char* fragEntry,
@@ -135,8 +147,9 @@ void LiveMaterial::SetShaderSource(
 		task.shaderType = Fragment;
 		task.src = fragSrc;
 		task.entryPoint = fragEntry;
-		task.filename = GetShaderIncludePath() + "\\shader.hlsl";
+		task.filename = GetShaderIncludePath() + "\\frag.hlsl";
 		task.liveMaterial = this;
+		task.id = ++inputId;
 		tasks.push_back(task);
 	}
 
@@ -145,8 +158,9 @@ void LiveMaterial::SetShaderSource(
 		task.shaderType = Vertex;
 		task.src = vertSrc;
 		task.entryPoint = vertEntry;
-		task.filename = GetShaderIncludePath() + "\\shader.hlsl";
+		task.filename = GetShaderIncludePath() + "\\vert.hlsl";
 		task.liveMaterial = this;
+		task.id = ++inputId;
 		tasks.push_back(task);
 	}
 
@@ -155,9 +169,7 @@ void LiveMaterial::SetShaderSource(
 
 void LiveMaterial::SetComputeSource(
 	const char* source, const char* entryPoint) {
-
 	assert(false);
-
 }
 
 void RenderAPI::Initialize() {
@@ -172,6 +184,10 @@ void RenderAPI::runCompileFunc() {
 	}
 }
 
+void RenderAPI::DrawMaterials(int uniformIndex)
+{
+}
+
 bool RenderAPI::compileShader(CompileTask task) {
 	assert(false);
 	return false;
@@ -180,6 +196,8 @@ bool RenderAPI::compileShader(CompileTask task) {
 void RenderAPI::compileThreadFunc(RenderAPI * renderAPI) { renderAPI->runCompileFunc(); }
 
 bool RenderAPI::DestroyLiveMaterial(int id) {
+	lock_guard<mutex> guard(materialsMutex);
+
 	auto iter = liveMaterials.find(id);
 	if (iter == liveMaterials.end())
 		return false;
@@ -194,6 +212,7 @@ bool RenderAPI::DestroyLiveMaterial(int id) {
 
 LiveMaterial * RenderAPI::GetLiveMaterialById(int id)
 {
+	lock_guard<mutex> guard(materialsMutex);
 	auto iter = liveMaterials.find(id);
 	if (iter == liveMaterials.end())
 		return nullptr;

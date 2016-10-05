@@ -206,6 +206,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   NumLiveMaterialsToMake: 50
   delay: 1
+  loop: 1
 --- !u!4 &726342902
 Transform:
   m_ObjectHideFlags: 0
