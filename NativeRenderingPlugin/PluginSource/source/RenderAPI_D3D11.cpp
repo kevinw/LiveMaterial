@@ -9,6 +9,7 @@
 
 #define DebugHR(hr)
 
+#include <algorithm>
 #include <assert.h>
 #include <d3d11.h>
 #include "Unity/IUnityGraphicsD3D11.h"
@@ -34,7 +35,6 @@ static bool DX_CHECK(HRESULT hr) {
 struct CompileOutput {
 	ShaderType shaderType;
 	ID3DBlob *shaderBlob;
-	LiveMaterial* liveMaterial;
 	int inputId;
 };
 
@@ -56,9 +56,17 @@ public:
 			SAFE_RELEASE(resourceViews[i]);
 		}
 		resourceViews.clear();
-
 		// TODO: release pendingResources
+
+		{
+			lock_guard<mutex> guard(compileOutputMutex);
+			for (size_t i = 0; i < compileOutput.size(); ++i)
+				SAFE_RELEASE(compileOutput[i].shaderBlob);
+			compileOutput.clear();
+		}
 	}
+
+	void QueueCompileOutput(CompileOutput& output);
 
 	virtual void Draw(int uniformIndex);
 	void DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
@@ -100,6 +108,10 @@ protected:
 	vector<ID3D11ShaderResourceView*> resourceViews;
 	vector<std::pair<ID3D11Resource*, size_t> > pendingResources;
 	map<string, size_t> resourceViewIndexes;
+
+	// Compile outputs
+	mutex compileOutputMutex;
+	vector<CompileOutput> compileOutput;
 };
 
 static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
@@ -123,6 +135,11 @@ static int roundUp(int numToRound, int multiple) {
 	assert(multiple);
 	int isPositive = (int)(numToRound >= 0);
 	return ((numToRound + isPositive * (multiple - 1)) / multiple) * multiple;
+}
+
+void LiveMaterial_D3D11::QueueCompileOutput(CompileOutput& output) {
+	lock_guard<mutex> guard(compileOutputMutex);
+	compileOutput.push_back(output);
 }
 
 void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
@@ -272,8 +289,6 @@ class RenderAPI_D3D11 : public RenderAPI
 public:
 	RenderAPI_D3D11();
 	virtual ~RenderAPI_D3D11() {
-		lock_guard<mutex> guard(compileOutputMutex);
-		compileOutput.clear();
 	}
 
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces);
@@ -293,9 +308,6 @@ public:
 private:
 	void CreateResources();
 	void ReleaseResources();
-
-	mutex compileOutputMutex;
-	vector<CompileOutput> compileOutput;
 
 	ID3D11Device* m_Device;
 	ID3D11Buffer* m_VB; // vertex buffer
@@ -379,13 +391,15 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 	}
 	else {
 		{
-			lock_guard<mutex> guard(compileOutputMutex);
 			CompileOutput output;
-			output.liveMaterial = task.liveMaterial;
 			output.shaderType = task.shaderType;
 			output.shaderBlob = shaderBlob;
 			output.inputId = task.id;
-			compileOutput.push_back(output);
+
+			lock_guard<mutex> guard(materialsMutex);
+			auto liveMaterial = (LiveMaterial_D3D11*)GetLiveMaterialByIdLocked(task.liveMaterialId);
+			if (liveMaterial)
+				liveMaterial->QueueCompileOutput(output);
 		}
 
 		//if (shaderType == Fragment) {
@@ -576,17 +590,6 @@ void RenderAPI_D3D11::DrawSimpleTriangles(const float worldMatrix[16], int trian
 	ID3D11DeviceContext* ctx = NULL;
 	m_Device->GetImmediateContext(&ctx);
 
-	{
-		lock_guard<mutex> guard(compileOutputMutex);
-		for (size_t i = 0; i < compileOutput.size(); ++i) {
-			auto output = compileOutput[i];
-			assert(output.liveMaterial);
-			auto liveMaterial = (LiveMaterial_D3D11*)output.liveMaterial;
-			liveMaterial->updateD3D11Shader(output);
-		}
-		compileOutput.clear();
-	}
-
 	// Set basic render state
 	ctx->OMSetDepthStencilState(m_DepthState, 0);
 	ctx->RSSetState(m_RasterState);
@@ -721,6 +724,17 @@ void LiveMaterial_D3D11::updateUniforms(ID3D11DeviceContext* ctx, int uniformInd
 }
 
 void LiveMaterial_D3D11::DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex) {
+	vector<CompileOutput> outputs;
+
+	{
+		lock_guard<mutex> guard(compileOutputMutex);
+		outputs = compileOutput;
+		compileOutput.clear();
+	}
+
+	for (size_t i = 0; i < outputs.size(); ++i)
+		updateD3D11Shader(outputs[i]);
+	
 	if (_pixelShader && _vertexShader) {
 		setupPendingResources(ctx);
 		updateUniforms(ctx, uniformIndex);	

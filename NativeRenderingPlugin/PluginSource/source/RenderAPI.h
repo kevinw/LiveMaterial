@@ -57,7 +57,7 @@ struct CompileTask {
 	string src;
 	string filename;
 	string entryPoint;
-	LiveMaterial* liveMaterial;
+	int liveMaterialId;
 	int id;
 };
 
@@ -74,7 +74,6 @@ public:
 	void SetMatrix(const char* name, float* value);
 	void SubmitUniforms(int uniformsIndex);
 	void setproparray(const char* name, PropType type, const char* methodName, float* value, int numFloats);
-
 	virtual void Draw(int uniformIndex);
 
 	float GetFloat(const char* name);
@@ -103,6 +102,7 @@ private:
 	LiveMaterial();
 	LiveMaterial(const LiveMaterial&);
 };
+
 // Super-simple "graphics abstraction" This is nothing like how a proper platform abstraction layer would look like;
 // all this does is a base interface for whatever our plugin sample needs. Which is only "draw some triangles"
 // and "modify a texture" at this point.
@@ -120,6 +120,7 @@ public:
 	// Process general event like initialization, shutdown, device loss/reset etc.
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces) = 0;
 
+	virtual void DidDestroy(LiveMaterial* liveMaterial);
 
 	// Draw some triangle geometry, using some simple rendering state.
 	// Upon call into our plug-in the render state can be almost completely arbitrary depending

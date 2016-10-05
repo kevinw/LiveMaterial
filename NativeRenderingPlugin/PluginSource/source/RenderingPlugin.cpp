@@ -232,11 +232,7 @@ static void UNITY_INTERFACE_API OnRenderEvent(int packedValue)
 	auto liveMaterial = s_CurrentAPI->GetLiveMaterialByIdLocked(id);
 	if (liveMaterial) {
 		liveMaterial->Draw(uniformIndex);
-	} else {
-		// TODO: this shouldn't be possible
-		//DebugSS("Drawing material id " << id << " with uniformIndex " << uniformIndex << " FAILED (lookup failed)");
 	}
-	//s_CurrentAPI->DrawMaterials(uniformIndex);
 	//ModifyTexturePixels();
 }
 

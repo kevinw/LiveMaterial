@@ -178,7 +178,7 @@ void LiveMaterial::SetShaderSource(
 		task.src = fragSrc;
 		task.entryPoint = fragEntry;
 		task.filename = GetShaderIncludePath() + "\\frag.hlsl";
-		task.liveMaterial = this;
+		task.liveMaterialId = id();
 		task.id = ++inputId;
 		tasks.push_back(task);
 	}
@@ -189,7 +189,7 @@ void LiveMaterial::SetShaderSource(
 		task.src = vertSrc;
 		task.entryPoint = vertEntry;
 		task.filename = GetShaderIncludePath() + "\\vert.hlsl";
-		task.liveMaterial = this;
+		task.liveMaterialId = id();
 		task.id = ++inputId;
 		tasks.push_back(task);
 	}
@@ -236,8 +236,12 @@ bool RenderAPI::DestroyLiveMaterial(int id) {
 	assert(liveMaterial->id() == id);
 
 	liveMaterials.erase(id);
+	DidDestroy(liveMaterial);
 	delete liveMaterial;
 	return true;
+}
+
+void RenderAPI::DidDestroy(LiveMaterial* liveMaterial) {
 }
 
 LiveMaterial * RenderAPI::GetLiveMaterialById(int id)
