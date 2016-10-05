@@ -109,6 +109,11 @@ static ShaderProp* _lookupPropByName(const PropMap& props, const char* name) {
 	return i != props.end() ? i->second : nullptr;
 }
 
+bool LiveMaterial::HasProperty(const char* name) {
+	lock_guard<mutex> guard(uniformsMutex);
+	return _lookupPropByName(shaderProps, name) != nullptr;
+}
+
 ShaderProp * LiveMaterial::propForNameSizeOffset(const char * name, uint16_t size, uint16_t offset) {
 	auto prop = _lookupPropByName(shaderProps, name);
 	if (!prop || prop->size != size || prop->offset != offset) {

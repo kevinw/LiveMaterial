@@ -35,8 +35,8 @@ public class LiveMaterial : MonoBehaviour
         [DllImport(PluginName)] internal static extern float GetFloat(IntPtr nativePtr, string name);
         [DllImport(PluginName)] internal static extern void GetVector4(IntPtr nativePtr, string name, float[] value);
         [DllImport(PluginName)] internal static extern void GetMatrix(IntPtr nativePtr, string name, float[] value);
+        [DllImport(PluginName)] internal static extern bool HasProperty(IntPtr nativePtr, string name);
         [DllImport(PluginName)] internal static extern void SubmitUniforms(IntPtr nativePtr, int uniformsIndex);
-
         [DllImport(PluginName)] internal static extern void PrintUniforms(IntPtr nativePtr);
     }
 
@@ -47,6 +47,7 @@ public class LiveMaterial : MonoBehaviour
     const int ID_DESTROYED = -2;
     int _nativeId = ID_UNSET;
     IntPtr _nativePtr = IntPtr.Zero;
+    static IntPtr DELETED_PTR = new IntPtr(-1);
 
     public int NativeId {
         get {
@@ -109,6 +110,8 @@ public class LiveMaterial : MonoBehaviour
             scratch[i] = matrix[i];
         Native.SetMatrix(NativePtr, name, scratch);
     }
+
+    public bool HasProperty(string name) { return Native.HasProperty(NativePtr, name); }
     
     public Vector4 GetVector4(string name) {
         Native.GetVector4(NativePtr, name, scratch);
@@ -158,7 +161,6 @@ public class LiveMaterial : MonoBehaviour
     }
 
 	IEnumerator Start() {
-
 		//CreateTextureAndPassToPlugin();
 		yield return StartCoroutine(CallPluginAtEndOfFrames());
 	}
@@ -167,11 +169,11 @@ public class LiveMaterial : MonoBehaviour
         if (_nativePtr != IntPtr.Zero) {
             Native.DestroyLiveMaterial(_nativePtr);
             _nativeId = ID_DESTROYED;
-            _nativePtr = new IntPtr(-1);
+            _nativePtr = DELETED_PTR;
         }
     }
 
-	private void CreateTextureAndPassToPlugin() {
+	//private void CreateTextureAndPassToPlugin() {
 		//Texture2D tex = new Texture2D(256,256,TextureFormat.ARGB32,false);
 		//tex.filterMode = FilterMode.Point;
 		//tex.Apply();
@@ -181,21 +183,26 @@ public class LiveMaterial : MonoBehaviour
             //renderer.material.mainTexture = tex;
 
 		//Native.SetTextureFromUnity (tex.GetNativeTexturePtr(), tex.width, tex.height);
-	}
+	//}
+
+    int GetPluginEventId(int uniformsIndex32) {
+        Assert.IsTrue(NativeId <= Int16.MaxValue);
+        Int16 id = (Int16)NativeId;
+        Int16 uniformsIndex = (Int16)uniformsIndex32;
+        Int32 packedValue = (id << 16) | (uniformsIndex & 0xffff);
+        return packedValue;
+    }
+
+    bool Alive { get { return _nativePtr != IntPtr.Zero && _nativePtr != DELETED_PTR;  } }
 
 	private IEnumerator CallPluginAtEndOfFrames() {
 		while (true) {
 			yield return new WaitForEndOfFrame();
 			Native.SetTimeFromUnity (Time.timeSinceLevelLoad);
-
-            if (_nativePtr != IntPtr.Zero && _nativePtr != new IntPtr(-1)) {
-                Assert.IsTrue(NativeId <= Int16.MaxValue);
-                Int16 id = (Int16)NativeId;
-                Int16 uniformsIndex = 0;
-                Int32 packedValue = (id << 16) | (uniformsIndex & 0xffff);
-
-                SubmitUniforms(0);
-                GL.IssuePluginEvent(Native.GetRenderEventFunc(), packedValue);
+            if (Alive) {
+                int uniformIndex = 0;
+                SubmitUniforms(uniformIndex);
+                GL.IssuePluginEvent(Native.GetRenderEventFunc(), GetPluginEventId(uniformIndex));
             }
 		}
 	}

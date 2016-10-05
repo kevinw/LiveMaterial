@@ -104,6 +104,7 @@ FragOutput fragSimple(FragInput fragInput) {
                 var m = liveMaterials[i];
                 var color = new Color(Random.Range(0, 1f), Random.Range(0, 1f), Random.Range(0, 1f), 1.0f);
                 m.SetColor("color", color);
+                Assert.IsTrue(m.HasProperty("color"));
                 Assert.AreEqual(color, m.GetColor("color"));
 
                 var floatVal = Random.Range(0, 0.4f);

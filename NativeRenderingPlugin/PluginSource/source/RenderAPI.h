@@ -79,6 +79,7 @@ public:
 	bool SetTextureID(const char* name, int id);
 	void SetTexturePtr(const char* name, int id, void* nativeTexturePointer);
 	void SubmitUniforms(int uniformsIndex);
+	bool HasProperty(const char* name);
 	void PrintUniforms();
 	void setproparray(const char* name, PropType type, float* value, int numFloats);
 	void getproparray(const char* name, PropType type, float* value, int numFloats);
