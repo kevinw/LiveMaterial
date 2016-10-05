@@ -115,47 +115,28 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 }
 
 
-
-extern "C" {
 #define UNITY_FUNC UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
 
-	int UNITY_FUNC CreateLiveMaterial() {
+typedef LiveMaterial* NativePtr;
+
+extern "C" {
+
+	NativePtr UNITY_FUNC CreateLiveMaterial() {
 		assert(s_CurrentAPI);
-		return s_CurrentAPI->CreateLiveMaterial()->id();
+		return s_CurrentAPI->CreateLiveMaterial();
 	}
 
-	void UNITY_FUNC DestroyLiveMaterial(int id) {
-		assert(s_CurrentAPI);
-		if (s_CurrentAPI) {
-			s_CurrentAPI->DestroyLiveMaterial(id);
-		}
+	void UNITY_FUNC DestroyLiveMaterial(LiveMaterial* liveMaterial) {
+		s_CurrentAPI->DestroyLiveMaterial(liveMaterial->id());
 	}
 
-	void UNITY_FUNC SetShaderSource(int id, const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry) {
-		assert(s_CurrentAPI);
-		if (s_CurrentAPI) {
-			auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
-			if (!liveMaterial) {
-				DebugSS("No LiveMaterial with id " << id);
-			} else {
-				liveMaterial->SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry);
-			}
-		}
-	}
+	int UNITY_FUNC GetLiveMaterialId(LiveMaterial* liveMaterial) { return liveMaterial->id(); }
 
-	void UNITY_FUNC SetFloat(int id, const char* name, float value) {
-		assert(s_CurrentAPI);
-		auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
-		if (liveMaterial)
-			liveMaterial->SetFloat(name, value);
-	}
-
-	void UNITY_FUNC SetMatrix(int id, const char* name, float* value) {
-		assert(s_CurrentAPI);
-		auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
-		if (liveMaterial)
-			liveMaterial->SetMatrix(name, value);
-	}
+	void UNITY_FUNC SetShaderSource(LiveMaterial* liveMaterial, const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry) { liveMaterial->SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry); }
+	void UNITY_FUNC SubmitUniforms(LiveMaterial* liveMaterial, int uniformsIndex) { liveMaterial->SubmitUniforms(uniformsIndex); }
+	void UNITY_FUNC SetFloat(LiveMaterial* liveMaterial, const char* name, float value) { liveMaterial->SetFloat(name, value); }
+	void UNITY_FUNC SetVector4(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetVector4(name, value); }
+	void UNITY_FUNC SetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetMatrix(name, value); }
 
 	void UNITY_FUNC SetShaderIncludePath(const char* includePath) { s_shaderIncludePath = includePath; }
 }
@@ -165,13 +146,11 @@ static void DrawColoredTriangle(int uniformIndex)
 	// Draw a colored triangle. Note that colors will come out differently
 	// in D3D and OpenGL, for example, since they expect color bytes
 	// in different ordering.
-	struct MyVertex
-	{
+	struct MyVertex {
 		float x, y, z;
 		unsigned int color;
 	};
-	MyVertex verts[3] =
-	{
+	MyVertex verts[3] = {
 		{ -0.5f, -0.25f,  0, 0xFFff0000 },
 		{ 0.5f, -0.25f,  0, 0xFF00ff00 },
 		{ 0,     0.5f ,  0, 0xFF0000ff },
@@ -189,7 +168,6 @@ static void DrawColoredTriangle(int uniformIndex)
 	};
 
 	s_CurrentAPI->DrawSimpleTriangles(worldMatrix, 1, verts);
-	s_CurrentAPI->DrawMaterials(uniformIndex);
 }
 
 
@@ -240,14 +218,26 @@ static void ModifyTexturePixels()
 }
 
 
-static void UNITY_INTERFACE_API OnRenderEvent(int uniformIndex)
+static void UNITY_INTERFACE_API OnRenderEvent(int packedValue)
 {
 	// Unknown / unsupported graphics device type? Do nothing
 	if (s_CurrentAPI == NULL)
 		return;
 
+	int16_t uniformIndex = packedValue & 0xffff;
+	int16_t id = (packedValue >> 16) & 0xffff;
+
 	DrawColoredTriangle(uniformIndex);
-	ModifyTexturePixels();
+	lock_guard<mutex> guard(s_CurrentAPI->materialsMutex);
+	auto liveMaterial = s_CurrentAPI->GetLiveMaterialByIdLocked(id);
+	if (liveMaterial) {
+		liveMaterial->Draw(uniformIndex);
+	} else {
+		// TODO: this shouldn't be possible
+		//DebugSS("Drawing material id " << id << " with uniformIndex " << uniformIndex << " FAILED (lookup failed)");
+	}
+	//s_CurrentAPI->DrawMaterials(uniformIndex);
+	//ModifyTexturePixels();
 }
 
 

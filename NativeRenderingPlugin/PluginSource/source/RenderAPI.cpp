@@ -19,8 +19,38 @@ LiveMaterial::LiveMaterial(RenderAPI* renderAPI, int id)
 	, _id(id)
 {}
 
+void LiveMaterial::SubmitUniforms(int uniformIndex) {
+	lock_guard<mutex> uniformsGuard(uniformsMutex);
+	lock_guard<mutex> gpuGuard(gpuMutex);
+	assert(uniformIndex < MAX_GPU_BUFFERS);
+	if (_gpuBuffer && _constantBuffer)
+		memcpy(_gpuBuffer + _constantBufferSize * uniformIndex, _constantBuffer, _constantBufferSize);
+}
+
+void LiveMaterial::setproparray(const char* name, PropType type, const char* methodName, float* value, int numFloats) {
+    lock_guard<mutex> guard(uniformsMutex);
+
+    if (!_constantBuffer)
+		return;
+
+    auto prop = propForName(name, type);
+    if (!prop)
+		return;
+    
+	size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, prop->size * prop->arraySize);
+	memcpy(_constantBuffer + prop->offset, value, bytesToCopy);
+}
+
+void LiveMaterial::Draw(int uniformIndex)
+{
+}
+
 void LiveMaterial::SetFloat(const char * name, float value)
 {
+}
+
+void LiveMaterial::SetVector4(const char * name, float* value) {
+    setproparray(name, PropType::Vector4, __func__, value, 4);
 }
 
 void LiveMaterial::SetMatrix(const char * name, float * value)
@@ -213,6 +243,11 @@ bool RenderAPI::DestroyLiveMaterial(int id) {
 LiveMaterial * RenderAPI::GetLiveMaterialById(int id)
 {
 	lock_guard<mutex> guard(materialsMutex);
+	return GetLiveMaterialByIdLocked(id);
+}
+
+LiveMaterial * RenderAPI::GetLiveMaterialByIdLocked(int id)
+{
 	auto iter = liveMaterials.find(id);
 	if (iter == liveMaterials.end())
 		return nullptr;

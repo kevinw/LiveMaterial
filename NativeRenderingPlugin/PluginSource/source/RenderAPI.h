@@ -70,7 +70,12 @@ public:
 	int id() const { return _id; }
 
 	void SetFloat(const char* name, float value);
+	void SetVector4(const char* name, float* value);
 	void SetMatrix(const char* name, float* value);
+	void SubmitUniforms(int uniformsIndex);
+	void setproparray(const char* name, PropType type, const char* methodName, float* value, int numFloats);
+
+	virtual void Draw(int uniformIndex);
 
 	float GetFloat(const char* name);
 
@@ -137,13 +142,14 @@ public:
 	bool DestroyLiveMaterial(int id);
 
 	LiveMaterial* GetLiveMaterialById(int id);
+	LiveMaterial* GetLiveMaterialByIdLocked(int id);
 
 	void QueueCompileTasks(vector<CompileTask> tasks);
+	mutex materialsMutex;
 
 protected:
 	virtual bool compileShader(CompileTask compileTask);
 
-	mutex materialsMutex;
 	int liveMaterialCount = 0;
 	map<int, LiveMaterial*> liveMaterials;
 

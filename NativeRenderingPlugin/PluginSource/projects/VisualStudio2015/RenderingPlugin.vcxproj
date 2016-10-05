@@ -24,6 +24,7 @@
     <ClInclude Include="..\..\source\GLEW\wglew.h" />
     <ClInclude Include="..\..\source\PlatformBase.h" />
     <ClInclude Include="..\..\source\RenderAPI.h" />
+    <ClInclude Include="..\..\source\RenderingPlugin.h" />
     <ClInclude Include="..\..\source\Unity\IUnityGraphics.h" />
     <ClInclude Include="..\..\source\Unity\IUnityGraphicsD3D11.h" />
     <ClInclude Include="..\..\source\Unity\IUnityGraphicsD3D12.h" />

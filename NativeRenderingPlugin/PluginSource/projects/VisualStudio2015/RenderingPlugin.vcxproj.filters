@@ -30,6 +30,7 @@
     <ClInclude Include="..\..\source\Unity\IUnityInterface.h">
       <Filter>Unity</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\source\RenderingPlugin.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\source\RenderAPI.cpp" />

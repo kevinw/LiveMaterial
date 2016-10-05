@@ -60,6 +60,7 @@ public:
 		// TODO: release pendingResources
 	}
 
+	virtual void Draw(int uniformIndex);
 	void DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
 
 	void updateD3D11Shader(CompileOutput output);
@@ -632,14 +633,16 @@ void RenderAPI_D3D11::EndModifyTexture(void* textureHandle, int textureWidth, in
 
 	ID3D11DeviceContext* ctx = NULL;
 	m_Device->GetImmediateContext(&ctx);
-	// Update texture data, and free the memory buffer
-	ctx->UpdateSubresource(d3dtex, 0, NULL, dataPtr, rowPitch, 0);
-	delete[] (unsigned char*)dataPtr;
-	ctx->Release();
+	if (ctx) {
+		// Update texture data, and free the memory buffer
+		ctx->UpdateSubresource(d3dtex, 0, NULL, dataPtr, rowPitch, 0);
+		delete[](unsigned char*)dataPtr;
+		ctx->Release();
+	}
 }
 
 void RenderAPI_D3D11::DrawMaterials(int uniformIndex) {
-	ID3D11DeviceContext* ctx = NULL;
+	ID3D11DeviceContext* ctx = nullptr;
 	D3D11Device()->GetImmediateContext (&ctx);
 	if (ctx) {
 		lock_guard<mutex> guard(materialsMutex);
@@ -647,9 +650,19 @@ void RenderAPI_D3D11::DrawMaterials(int uniformIndex) {
 			auto liveMaterial = iter->second;
 			((LiveMaterial_D3D11*)liveMaterial)->DrawD3D11(ctx, uniformIndex);
 		}
+		ctx->Release();
 	}
-	ctx->Release();
 }
+
+void LiveMaterial_D3D11::Draw(int uniformIndex) {
+	ID3D11DeviceContext* ctx = nullptr;
+	device()->GetImmediateContext(&ctx);
+	if (ctx) {
+		DrawD3D11(ctx, uniformIndex);
+		ctx->Release();
+	}
+}
+
 
 ID3D11Device* LiveMaterial_D3D11::device() const {
 	return ((RenderAPI_D3D11*)_renderAPI)->D3D11Device();

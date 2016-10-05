@@ -42,10 +42,17 @@ struct FragInput {
   float2 uv : TEXCOORD0;
 };
 
+float4 color;
+
 FragOutput fragSimple(FragInput fragInput) {
 	// test uv inputs
 	FragOutput output;
 	output.color = float4(fragInput.uv.x, fragInput.uv.y, 1, 1);
+    if (fragInput.uv.x > 0.25 && fragInput.uv.x < .75 &&
+        fragInput.uv.y > 0.25 && fragInput.uv.y < .75) {
+        output.color = color;
+    }
+    
 	return output;
 }
 ";
