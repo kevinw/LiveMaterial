@@ -76,6 +76,8 @@ public:
 	void SetVector4(const char* name, float* value);
 	void SetMatrix(const char* name, float* value);
 	void SetFloatArray(const char* name, float* value, int numFloats);
+	bool SetTextureID(const char* name, int id);
+	void SetTexturePtr(const char* name, int id, void* nativeTexturePointer);
 	void SubmitUniforms(int uniformsIndex);
 	void PrintUniforms();
 	void setproparray(const char* name, PropType type, float* value, int numFloats);
@@ -90,6 +92,7 @@ public:
 protected:
 	ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
 	ShaderProp* propForName(const char* name, PropType type);
+	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
 
 	RenderAPI* _renderAPI;
 	int _id;
@@ -103,6 +106,9 @@ protected:
 	PropMap shaderProps; // a mapping of name -> prop description, type, and offset into the constant buffer
 
 	mutex gpuMutex;
+
+	mutex texturesMutex;
+	map<int, void*> texturePointers; // caches Object::InstanceID() -> GetNativeTexturePtr()
 
 private:
 	LiveMaterial();

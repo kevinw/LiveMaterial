@@ -26,6 +26,8 @@ public class LiveMaterial : MonoBehaviour
         internal static extern int GetLiveMaterialId(IntPtr nativePtr);
         [DllImport(PluginName)] internal static extern void DestroyLiveMaterial(IntPtr nativePtr);
         [DllImport(PluginName)] internal static extern void SetShaderSource(IntPtr nativePtr, string fragSrc, string fragEntry, string vertSrc, string vertEntry);
+        [DllImport(PluginName)] internal static extern bool SetTextureID(IntPtr nativePtr, string name, int id);
+        [DllImport(PluginName)] internal static extern void SetTexturePtr(IntPtr nativePtr, string name, int id, IntPtr texture);
         [DllImport(PluginName)] internal static extern void SetVector4(IntPtr nativePtr, string name, float[] value);
         [DllImport(PluginName)] internal static extern void SetFloatArray(IntPtr nativePtr, string name, float[] value, int numFloats);
         [DllImport(PluginName)] internal static extern void SetMatrix(IntPtr nativePtr, string name, float[] value);
@@ -122,6 +124,12 @@ public class LiveMaterial : MonoBehaviour
         for (int j = 0; j < 16; ++j)
             m[j] = scratch[j];
         return m;
+    }
+
+    public void SetTexture(string name, Texture texture) {
+        var instanceID = texture != null ? texture.GetInstanceID() : 0;
+        if (Native.SetTextureID(NativePtr, name, instanceID))
+            Native.SetTexturePtr(NativePtr, name, instanceID, texture.GetNativeTexturePtr());
     }
 
     public void PrintUniforms() { Native.PrintUniforms(NativePtr); }

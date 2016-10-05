@@ -4,6 +4,7 @@ using System.Collections;
 
 public class StressLiveMaterial : MonoBehaviour {
     public int NumLiveMaterialsToMake = 10;
+    public Texture2D testTexture;
     public float delay = 1.0f;
     public bool loop = true;
 
@@ -47,12 +48,15 @@ float4 color;
 float floatVal;
 float4 vectorVal;
 float4 vectors[50];
+sampler2D testTexture;
 
 FragOutput fragSimple(FragInput fragInput) {
 	// test uv inputs
 	FragOutput output;
     float2 uv = fragInput.uv;
 	output.color = float4(uv.x, uv.y, 1, 1);
+
+    output.color *= tex2D(testTexture, uv);
 
     for (int i = 0; i < 50; ++i) {
         float2 pos = vectors[i].xy;
@@ -114,6 +118,9 @@ FragOutput fragSimple(FragInput fragInput) {
                 for (int j = 0; j < vectors.Length; ++j)
                     vectors[j] = Random.insideUnitCircle + Vector2.one * 0.5f;
                 m.SetVectorArray("vectors", vectors);
+
+                if (testTexture != null)
+                    m.SetTexture("testTexture", testTexture);
             }
 
             yield return new WaitForSeconds(delay);

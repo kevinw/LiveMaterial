@@ -52,13 +52,18 @@ public:
 		SAFE_RELEASE(_deviceConstantBuffer);
 		SAFE_RELEASE(_samplerState);
 
-		for (size_t i = 0; i < resourceViews.size(); ++i) {
-			SAFE_RELEASE(resourceViews[i]);
-		}
-		resourceViews.clear();
-		// TODO: release pendingResources
+		{ // Cleanup textures
+			lock_guard<mutex> guard(texturesMutex);
+			for (size_t i = 0; i < resourceViews.size(); ++i)
+				SAFE_RELEASE(resourceViews[i]);
+			resourceViews.clear();
 
-		{
+			for (size_t i = 0; i < pendingResources.size(); ++i)
+				SAFE_RELEASE(pendingResources[i].first);
+			pendingResources.clear();
+		}
+
+		{ // Cleanup compile outputs
 			lock_guard<mutex> guard(compileOutputMutex);
 			for (size_t i = 0; i < compileOutput.size(); ++i)
 				SAFE_RELEASE(compileOutput[i].shaderBlob);
@@ -75,6 +80,8 @@ public:
 	void constantBufferReflect(ID3DBlob* shaderBlob);
 
 protected:
+	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
+
 	ID3D11Device* device() const;
 
 	ID3D11SamplerState* samplerState() {
@@ -104,7 +111,6 @@ protected:
 	ID3D11SamplerState* _samplerState = nullptr;
 
 	// Resource Views (textures)
-	mutex resourceViewsMutex;
 	vector<ID3D11ShaderResourceView*> resourceViews;
 	vector<std::pair<ID3D11Resource*, size_t> > pendingResources;
 	map<string, size_t> resourceViewIndexes;
@@ -137,6 +143,23 @@ static int roundUp(int numToRound, int multiple) {
 	return ((numToRound + isPositive * (multiple - 1)) / multiple) * multiple;
 }
 
+
+void LiveMaterial_D3D11::_SetTexture(const char* name, void* nativeTexturePtr) {
+	lock_guard<mutex> guard(texturesMutex);
+
+	auto iter = resourceViewIndexes.find(name);
+	if (iter == resourceViewIndexes.end())
+		return;
+
+	auto index = iter->second;
+	assert(index < resourceViews.size());
+	auto resource = (ID3D11Resource*)nativeTexturePtr;
+	resource->AddRef();
+
+	pendingResources.push_back(std::pair<ID3D11Resource*, size_t>(resource, index));
+
+}
+
 void LiveMaterial_D3D11::QueueCompileOutput(CompileOutput& output) {
 	lock_guard<mutex> guard(compileOutputMutex);
 	compileOutput.push_back(output);
@@ -161,7 +184,7 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 	//stats.instructionCount = desc.InstructionCount;
 
 	{
-		lock_guard<mutex> guard(resourceViewsMutex);
+		lock_guard<mutex> guard(texturesMutex);
 		for (size_t i = 0; i < resourceViews.size(); ++i)
 			SAFE_RELEASE(resourceViews[i]);
 		resourceViews.clear();
@@ -673,7 +696,7 @@ ID3D11Device* LiveMaterial_D3D11::device() const {
 }
 
 void LiveMaterial_D3D11::setupPendingResources(ID3D11DeviceContext* ctx) {
-	lock_guard<mutex> guard(resourceViewsMutex);
+	lock_guard<mutex> guard(texturesMutex);
 
 	for (size_t i = 0; i < pendingResources.size(); ++i) {
 		auto resource = pendingResources[i].first;

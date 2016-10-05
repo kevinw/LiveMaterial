@@ -132,6 +132,8 @@ extern "C" {
 	int UNITY_FUNC GetLiveMaterialId(LiveMaterial* liveMaterial) { return liveMaterial->id(); }
 	void UNITY_FUNC SetShaderSource(LiveMaterial* liveMaterial, const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry) { liveMaterial->SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry); }
 	void UNITY_FUNC SubmitUniforms(LiveMaterial* liveMaterial, int uniformsIndex) { liveMaterial->SubmitUniforms(uniformsIndex); }
+	bool UNITY_FUNC SetTextureID(LiveMaterial* liveMaterial, const char* name, int id) { return liveMaterial->SetTextureID(name, id); }
+	void UNITY_FUNC SetTexturePtr(LiveMaterial* liveMaterial, const char* name, int id, void* nativeTexturePointer) { return liveMaterial->SetTexturePtr(name, id, nativeTexturePointer); }
 	void UNITY_FUNC SetFloat(LiveMaterial* liveMaterial, const char* name, float value) { liveMaterial->SetFloat(name, value); }
 	void UNITY_FUNC SetVector4(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetVector4(name, value); }
 	void UNITY_FUNC SetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetMatrix(name, value); }

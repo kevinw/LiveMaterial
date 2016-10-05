@@ -64,6 +64,42 @@ void LiveMaterial::SetFloatArray(const char * name, float * value, int numFloats
 	setproparray(name, PropType::FloatBlock, value, numFloats);
 }
 
+bool LiveMaterial::SetTextureID(const char * name, int id)
+{
+	if (!id) {
+		_SetTexture(name, nullptr);
+		return false;
+	}
+	
+	void* nativeTexturePointer = nullptr;
+	{
+		lock_guard<mutex> guard(texturesMutex);
+
+		auto iter = texturePointers.find(id);
+		if (iter == texturePointers.end())
+			return true; // needs pointer. caller will do expensive GetNativeTexturePtr
+
+		nativeTexturePointer = iter->second;
+		assert(nativeTexturePointer);
+	}
+
+	_SetTexture(name, nativeTexturePointer);
+	return false;
+}
+
+void LiveMaterial::SetTexturePtr(const char * name, int id, void * nativeTexturePointer)
+{
+	assert(id);
+	assert(texturePointers.find(id) == texturePointers.end());
+	texturePointers[id] = nativeTexturePointer;
+	bool needsSet = SetTextureID(name, id);
+	assert(!needsSet);
+}
+
+void LiveMaterial::_SetTexture(const char* name, void* nativeTexturePointer) {
+	assert(false);
+}
+
 void LiveMaterial::GetFloat(const char * name, float* value) { getproparray(name, PropType::Float, value, 1); }
 void LiveMaterial::GetVector4(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 4); }
 void LiveMaterial::GetMatrix(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 16); }
