@@ -40,8 +40,11 @@ void LiveMaterial::setproparray(const char* name, PropType type, float* value, i
 }
 
 void LiveMaterial::getproparray(const char* name, PropType type, float* value, int numFloats) {
-    lock_guard<mutex> guard(uniformsMutex);
+	lock_guard<mutex> guard(uniformsMutex);
+	getproparray_locked(name, type, value, numFloats);
+}
 
+void LiveMaterial::getproparray_locked(const char* name, PropType type, float* value, int numFloats) {
     if (!_constantBuffer) return;
 
     auto prop = propForName(name, type);
@@ -208,6 +211,38 @@ void LiveMaterial::SetShaderSource(
 	}
 
 	_renderAPI->QueueCompileTasks(tasks);
+}
+
+void LiveMaterial::PrintUniforms() {
+	lock_guard<mutex> guard(uniformsMutex);
+
+    std::stringstream ss;
+    for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
+        auto prop = i->second;
+        ss << prop->name << " ";
+#if SUPPORT_D3D11
+		ss << "(offset: " << prop->offset << ", size: " << prop->size << ") ";
+#endif
+
+		float values[16];
+		int numFloats;
+
+		switch (prop->type) {
+		case Float: numFloats = 1; break;
+		case Vector2: numFloats = 2; break;
+		case Vector3: numFloats = 3; break;
+		case Vector4: numFloats = 4; break;
+		case Matrix: numFloats = 16; break;
+		default: numFloats = 0; break;
+		}
+		getproparray_locked(prop->name.c_str(), prop->type, &values[0], numFloats);
+		for (int i = 0; i < numFloats; ++i) {
+			ss << values[i] << " ";
+		}
+        ss << "\n";
+    }
+    std::string s(ss.str());
+    Debug(s.c_str());
 }
 
 void LiveMaterial::SetComputeSource(

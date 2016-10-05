@@ -77,8 +77,10 @@ public:
 	void SetMatrix(const char* name, float* value);
 	void SetFloatArray(const char* name, float* value, int numFloats);
 	void SubmitUniforms(int uniformsIndex);
+	void PrintUniforms();
 	void setproparray(const char* name, PropType type, float* value, int numFloats);
 	void getproparray(const char* name, PropType type, float* value, int numFloats);
+	void getproparray_locked(const char* name, PropType type, float* value, int numFloats);
 	virtual void Draw(int uniformIndex);
 
 

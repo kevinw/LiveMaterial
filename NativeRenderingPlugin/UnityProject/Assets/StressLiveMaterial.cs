@@ -106,13 +106,13 @@ FragOutput fragSimple(FragInput fragInput) {
                 m.SetFloat("floatVal", floatVal);
                 Assert.AreEqual(floatVal, m.GetFloat("floatVal"));
 
-                Vector4 vec4Val = Random.insideUnitSphere;
+                Vector4 vec4Val = Random.insideUnitSphere + Vector3.one * 0.5f;
                 m.SetVector4("vectorVal", vec4Val);
                 Assert.AreEqual(vec4Val, m.GetVector4("vectorVal"));
 
                 Vector4[] vectors = new Vector4[50];
                 for (int j = 0; j < vectors.Length; ++j)
-                    vectors[j] = Random.insideUnitCircle;
+                    vectors[j] = Random.insideUnitCircle + Vector2.one * 0.5f;
                 m.SetVectorArray("vectors", vectors);
             }
 

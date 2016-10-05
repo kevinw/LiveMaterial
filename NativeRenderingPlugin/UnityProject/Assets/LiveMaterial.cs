@@ -3,6 +3,9 @@ using UnityEngine.Assertions;
 using System;
 using System.Collections;
 using System.Runtime.InteropServices;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 using Random = UnityEngine.Random;
 
@@ -31,6 +34,8 @@ public class LiveMaterial : MonoBehaviour
         [DllImport(PluginName)] internal static extern void GetVector4(IntPtr nativePtr, string name, float[] value);
         [DllImport(PluginName)] internal static extern void GetMatrix(IntPtr nativePtr, string name, float[] value);
         [DllImport(PluginName)] internal static extern void SubmitUniforms(IntPtr nativePtr, int uniformsIndex);
+
+        [DllImport(PluginName)] internal static extern void PrintUniforms(IntPtr nativePtr);
     }
 
     private static void DebugWrapper(string log) { Debug.Log(log); }
@@ -38,9 +43,8 @@ public class LiveMaterial : MonoBehaviour
 
     const int ID_UNSET = -1;
     const int ID_DESTROYED = -2;
-    public int _nativeId = ID_UNSET;
-
-    public IntPtr _nativePtr = IntPtr.Zero;
+    int _nativeId = ID_UNSET;
+    IntPtr _nativePtr = IntPtr.Zero;
 
     public int NativeId {
         get {
@@ -120,6 +124,8 @@ public class LiveMaterial : MonoBehaviour
         return m;
     }
 
+    public void PrintUniforms() { Native.PrintUniforms(NativePtr); }
+
     public void SubmitUniforms(int uniformsIndex) { Native.SubmitUniforms(NativePtr, uniformsIndex); }
 
 #if UNITY_EDITOR
@@ -186,3 +192,21 @@ public class LiveMaterial : MonoBehaviour
 		}
 	}
 }
+
+
+#if UNITY_EDITOR
+[CustomEditor(typeof(LiveMaterial))]
+public class LiveMaterialEditor : Editor {
+    public override void OnInspectorGUI() {
+        DrawDefaultInspector();
+        var mat = target as LiveMaterial;
+        if (GUILayout.Button("Print Uniforms"))			
+            mat.PrintUniforms();
+
+        //var stats = LiveMaterial.GetStats();
+        //GUILayout.Label("Instruction Count: " + stats.instructionCount);
+        //GUILayout.Label("Last Compile Time: " + stats.compileTimeMs + "ms");      
+    }
+}
+
+#endif
