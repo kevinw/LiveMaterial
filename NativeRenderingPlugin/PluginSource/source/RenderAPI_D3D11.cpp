@@ -42,38 +42,43 @@ class LiveMaterial_D3D11 : public LiveMaterial
 public:
 	LiveMaterial_D3D11(RenderAPI* renderAPI, int id)
 		: LiveMaterial(renderAPI, id)
-		, _pixelShader(nullptr)
-		, _vertexShader(nullptr)
-		, _computeShader(nullptr)
-	{
-	}
+	{}
 
-	virtual ~LiveMaterial_D3D11();
+	virtual ~LiveMaterial_D3D11() {
+		SAFE_RELEASE(_pixelShader);
+		SAFE_RELEASE(_vertexShader);
+		SAFE_RELEASE(_computeShader);
+
+		SAFE_RELEASE(_deviceConstantBuffer);
+
+		for (size_t i = 0; i < resourceViews.size(); ++i) {
+			SAFE_RELEASE(resourceViews[i]);
+		}
+		resourceViews.clear();
+
+		// TODO: release pendingResources
+	}
 
 	void updateD3D11Shader(CompileOutput output);
 	void constantBufferReflect(ID3DBlob* shaderBlob);
 
-
 protected:
 	ID3D11Device* device() const;
 
-	// Compiled shader objects
-	ID3D11PixelShader* _pixelShader;
-	ID3D11VertexShader* _vertexShader;
-	ID3D11ComputeShader* _computeShader;
-
 	// Uniforms
-	ID3D11Buffer* _deviceConstantBuffer;
-	UINT _deviceConstantBufferSize;
+	ID3D11Buffer* _deviceConstantBuffer = nullptr;
+	UINT _deviceConstantBufferSize = 0;
+
+	ID3D11PixelShader* _pixelShader = nullptr;
+	ID3D11VertexShader* _vertexShader = nullptr;
+	ID3D11ComputeShader* _computeShader = nullptr;
 
 	// Resource Views (textures)
 	mutex resourceViewsMutex;
 	vector<ID3D11ShaderResourceView*> resourceViews;
 	vector<std::pair<ID3D11Resource*, size_t> > pendingResources;
-	std::map<string, size_t> resourceViewIndexes;
+	map<string, size_t> resourceViewIndexes;
 };
-
-LiveMaterial_D3D11::~LiveMaterial_D3D11() {}
 
 static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
 	ID3D11ShaderReflection* reflector = nullptr;
@@ -190,28 +195,43 @@ void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 	auto shaderBlob = output.shaderBlob;
 	assert(shaderBlob);
 
+	constantBufferReflect(shaderBlob);
+
 	auto buf = shaderBlob->GetBufferPointer();
 	auto bufSize = shaderBlob->GetBufferSize();
 	assert(buf && bufSize > 0);
 
-	constantBufferReflect(shaderBlob);
-
 	switch (output.shaderType) {
 	case Fragment: {
-		SAFE_RELEASE(_pixelShader);
-		HRESULT hr = device()->CreatePixelShader(buf, bufSize, nullptr, &_pixelShader);
-		if (FAILED(hr)) { Debug("CreatePixelShader failed\n"); DebugHR(hr); }
+		ID3D11PixelShader* newPixelShader = nullptr;
+		HRESULT hr = device()->CreatePixelShader(buf, bufSize, nullptr, &newPixelShader);
+		if (FAILED(hr)) {
+			Debug("CreatePixelShader failed\n"); DebugHR(hr);
+		} else {
+			SAFE_RELEASE(_pixelShader);
+			_pixelShader = newPixelShader;
+		}
 	}
 	case Vertex: {
-		SAFE_RELEASE(_vertexShader);
-		HRESULT hr = device()->CreateVertexShader(buf, bufSize, nullptr, &_vertexShader);
-		if (FAILED(hr)) { Debug("CreateVertexShader failed"); DebugHR(hr); }
+		ID3D11VertexShader* newVertexShader = nullptr;
+		HRESULT hr = device()->CreateVertexShader(buf, bufSize, nullptr, &newVertexShader);
+		if (FAILED(hr)) {
+			Debug("CreateVertexShader failed"); DebugHR(hr);
+		} else {
+			SAFE_RELEASE(_vertexShader);
+			_vertexShader = newVertexShader;
+		}
 		break;
 	}
 	case Compute: {
-		SAFE_RELEASE(_computeShader);
-		HRESULT hr = device()->CreateComputeShader(buf, bufSize, nullptr, &_computeShader);
-		if (FAILED(hr)) { Debug("CreateComputeShader failed"); DebugHR(hr); }
+		ID3D11ComputeShader* newShader = nullptr;
+		HRESULT hr = device()->CreateComputeShader(buf, bufSize, nullptr, &newShader);
+		if (FAILED(hr)) {
+			Debug("CreateComputeShader failed"); DebugHR(hr);
+		} else {
+			SAFE_RELEASE(_computeShader);
+			_computeShader = newShader;
+		}
 		break;
 	}
 	default:
@@ -259,9 +279,7 @@ private:
 };
 
 
-LiveMaterial* RenderAPI_D3D11::_newLiveMaterial(int id) {
-	return new LiveMaterial_D3D11(this, id);
-}
+LiveMaterial* RenderAPI_D3D11::_newLiveMaterial(int id) { return new LiveMaterial_D3D11(this, id); }
 
 static const char* profileNameForShaderType(ShaderType shaderType) {
 	switch (shaderType) {
@@ -314,7 +332,6 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 	}
 
 	//StopWatch d3dCompileWatch;
-	//auto hr = CompileShader(src.c_str(), srcName.c_str(), entryPoint.c_str(), profile, defines, &shaderBlob, &error, flags);
 
 	HRESULT hr = D3DCompile(
 		task.src.c_str(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
@@ -331,12 +348,14 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 		//stats.compileState = CompileState::Error;
 	}
 	else {
-		lock_guard<mutex> guard(compileOutputMutex);
-		CompileOutput output;
-		output.liveMaterial = task.liveMaterial;
-		output.shaderType = task.shaderType;
-		output.shaderBlob = shaderBlob;
-		compileOutput.push_back(output);
+		{
+			lock_guard<mutex> guard(compileOutputMutex);
+			CompileOutput output;
+			output.liveMaterial = task.liveMaterial;
+			output.shaderType = task.shaderType;
+			output.shaderBlob = shaderBlob;
+			compileOutput.push_back(output);
+		}
 
 		//if (shaderType == Fragment) {
 			//stats.compileTimeMs = d3dCompileWatch.ElapsedMs();

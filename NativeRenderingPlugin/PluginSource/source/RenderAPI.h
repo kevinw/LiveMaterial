@@ -3,9 +3,11 @@
 #include "Unity/IUnityGraphics.h"
 #include <map>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <mutex>
 #include <thread>
+#include <iostream>
 
 #include "ConcurrentQueue.h"
 #include "ShaderProp.h"
@@ -16,16 +18,32 @@ using std::vector;
 using std::map;
 using std::mutex;
 using std::lock_guard;
+using std::stringstream;
 
 struct IUnityInterfaces;
+
+extern mutex debugLogMutex;
+typedef void(*DebugLogFuncPtr)(const char *);
+DebugLogFuncPtr GetDebugFunc();
+
+#define Debug(m) do { \
+	lock_guard<mutex> _debug_log_guard(debugLogMutex); \
+	if (GetDebugFunc()) { GetDebugFunc()(m); } else { std::cout << m << std::endl; } } while(0);
+
+#define DebugSS(ssexp) do { \
+	std::stringstream _ss; _ss << ssexp; \
+	std::string _sDebugString(_ss.str()); \
+    if (GetDebugFunc()) { \
+        GetDebugFunc()(_sDebugString.c_str()); \
+    } else { \
+		std::cout << _sDebugString.c_str() << std::endl; \
+	} \
+} while(0);
 
 class RenderAPI;
 class LiveMaterial;
 
 enum ShaderType { Vertex, Fragment, Compute };
-
-void Debug(const char* message);
-#define DebugSS(msg)
 
 #ifndef SAFE_DELETE
 #define SAFE_DELETE(a) if (a) { delete a; a = nullptr; }
@@ -52,10 +70,13 @@ public:
 
 	float GetFloat(const char* name);
 
+	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
+	void SetComputeSource(const char* source, const char* entryPoint);
+
+protected:
 	ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
 	ShaderProp* propForName(const char* name, PropType type);
 
-protected:
 	RenderAPI* _renderAPI;
 	int _id;
 
@@ -72,17 +93,6 @@ protected:
 private:
 	LiveMaterial();
 	LiveMaterial(const LiveMaterial&);
-};
-
-class LiveShader : public LiveMaterial {
-public:
-	void SetShaderSource(const char* fragSrc, const char* fragEntry,
-						 const char* vertSrc, const char* vertEntry);
-};
-
-class LiveCompute : public LiveMaterial {
-public:
-	void SetComputeSource(const char* source, const char* entryPoint);
 };
 // Super-simple "graphics abstraction" This is nothing like how a proper platform abstraction layer would look like;
 // all this does is a base interface for whatever our plugin sample needs. Which is only "draw some triangles"
@@ -130,14 +140,13 @@ protected:
 	virtual bool compileShader(CompileTask compileTask);
 
 	int liveMaterialCount = 0;
-	std::map<int, LiveMaterial*> liveMaterials;
+	map<int, LiveMaterial*> liveMaterials;
 
 	Queue<CompileTask> compileQueue;
 	thread* compileThread = nullptr;
 
 	static void compileThreadFunc(RenderAPI* renderAPI);
 	friend static void compileThreadFunc(RenderAPI* renderAPI);
-	
 
 	virtual LiveMaterial* _newLiveMaterial(int id);
 

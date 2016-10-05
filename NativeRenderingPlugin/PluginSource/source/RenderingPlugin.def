@@ -9,3 +9,6 @@ EXPORTS
    SetTimeFromUnity
    SetTextureFromUnity
    GetRenderEventFunc
+   SetCallbackFunctions
+   CreateLiveMaterial
+   DestroyLiveMaterial

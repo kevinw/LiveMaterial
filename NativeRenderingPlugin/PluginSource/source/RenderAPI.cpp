@@ -122,8 +122,7 @@ LiveMaterial* RenderAPI::_newLiveMaterial(int id) {
 	return nullptr;
 }
 
-
-void LiveShader::SetShaderSource(
+void LiveMaterial::SetShaderSource(
 	const char* fragSrc, const char* fragEntry,
 	const char* vertSrc, const char* vertEntry) {
 
@@ -154,8 +153,10 @@ void LiveShader::SetShaderSource(
 	_renderAPI->QueueCompileTasks(tasks);
 }
 
-void LiveCompute::SetComputeSource(
+void LiveMaterial::SetComputeSource(
 	const char* source, const char* entryPoint) {
+
+	assert(false);
 
 }
 
@@ -176,12 +177,7 @@ bool RenderAPI::compileShader(CompileTask task) {
 	return false;
 }
 
-void Debug(const char* message) {
-}
-
-
 void RenderAPI::compileThreadFunc(RenderAPI * renderAPI) { renderAPI->runCompileFunc(); }
-
 
 bool RenderAPI::DestroyLiveMaterial(int id) {
 	auto iter = liveMaterials.find(id);

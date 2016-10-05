@@ -8,6 +8,12 @@
 #include <map>
 
 
+mutex debugLogMutex;
+
+static DebugLogFuncPtr s_debugLogFunc = nullptr;
+DebugLogFuncPtr GetDebugFunc() { return s_debugLogFunc; }
+
+
 // --------------------------------------------------------------------------
 // SetTimeFromUnity, an example function we export which is called by one of the scripts.
 
@@ -55,9 +61,23 @@ extern "C" void	UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
 	OnGraphicsDeviceEvent(kUnityGfxDeviceEventInitialize);
 }
 
+
+extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetCallbackFunctions(DebugLogFuncPtr debugLogFunc) {
+	{
+		lock_guard<mutex> guard(debugLogMutex);
+		s_debugLogFunc = debugLogFunc;
+	}
+}
+
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
 {
 	s_Graphics->UnregisterDeviceEventCallback(OnGraphicsDeviceEvent);
+
+	// clear the debug log function
+	{
+		lock_guard<mutex> guard(debugLogMutex);
+		s_debugLogFunc = nullptr;
+	}
 }
 
 
@@ -68,11 +88,6 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
 
 static RenderAPI* s_CurrentAPI = NULL;
 static UnityGfxRenderer s_DeviceType = kUnityGfxRendererNull;
-
-static int UNITY_INTERFACE_API CreateLiveMaterial() {
-	assert(s_CurrentAPI);
-	return s_CurrentAPI->CreateLiveMaterial()->id();
-}
 
 static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType eventType)
 {
@@ -98,36 +113,55 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 }
 
 
-#define UNITY_FUNC_VOID extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
-
-UNITY_FUNC_VOID SetFloat(int id, const char* name, float value)
-{
-	assert(s_CurrentAPI);
-	auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
-	if (liveMaterial)
-		liveMaterial->SetFloat(name, value);
-}
-
-UNITY_FUNC_VOID SetMatrix(int id, const char* name, float* value) {
-	assert(s_CurrentAPI);
-	auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
-	if (liveMaterial)
-		liveMaterial->SetMatrix(name, value);
-}
 
 static string s_shaderIncludePath;
 
 string GetShaderIncludePath() { return s_shaderIncludePath; }
 
-UNITY_FUNC_VOID SetShaderIncludePath(const char* includePath) { s_shaderIncludePath = includePath; }
+extern "C" {
+#define UNITY_FUNC UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
+
+	int UNITY_FUNC CreateLiveMaterial() {
+		assert(s_CurrentAPI);
+		return s_CurrentAPI->CreateLiveMaterial()->id();
+	}
 
 
-// --------------------------------------------------------------------------
-// OnRenderEvent
-// This will be called for GL.IssuePluginEvent script calls; eventID will
-// be the integer passed to IssuePluginEvent. In this example, we just ignore
-// that value.
+	void UNITY_FUNC DestroyLiveMaterial(int id) {
+		assert(s_CurrentAPI);
+		if (s_CurrentAPI) {
+			s_CurrentAPI->DestroyLiveMaterial(id);
+		}
+	}
 
+	void UNITY_FUNC SetShaderSource(int id, const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry) {
+		assert(s_CurrentAPI);
+		if (s_CurrentAPI) {
+			auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
+			if (!liveMaterial) {
+				DebugSS("No LiveMaterial with id " << id);
+			} else {
+				liveMaterial->SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry);
+			}
+		}
+	}
+
+	void UNITY_FUNC SetFloat(int id, const char* name, float value) {
+		assert(s_CurrentAPI);
+		auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
+		if (liveMaterial)
+			liveMaterial->SetFloat(name, value);
+	}
+
+	void UNITY_FUNC SetMatrix(int id, const char* name, float* value) {
+		assert(s_CurrentAPI);
+		auto liveMaterial = s_CurrentAPI->GetLiveMaterialById(id);
+		if (liveMaterial)
+			liveMaterial->SetMatrix(name, value);
+	}
+
+	void UNITY_FUNC SetShaderIncludePath(const char* includePath) { s_shaderIncludePath = includePath; }
+}
 
 static void DrawColoredTriangle()
 {
@@ -218,9 +252,6 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
 	ModifyTexturePixels();
 }
 
-
-// --------------------------------------------------------------------------
-// GetRenderEventFunc, an example function we export which is used to get a rendering event callback function.
 
 extern "C" UnityRenderingEvent UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetRenderEventFunc()
 {
