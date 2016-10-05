@@ -233,7 +233,8 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 {
 	assert(output.shaderBlob);
-	constantBufferReflect(output.shaderBlob);
+	if (output.shaderType == Fragment || output.shaderType == Compute)
+		constantBufferReflect(output.shaderBlob);
 
 	auto buf = output.shaderBlob->GetBufferPointer();
 	auto bufSize = output.shaderBlob->GetBufferSize();

@@ -227,7 +227,7 @@ static void UNITY_INTERFACE_API OnRenderEvent(int packedValue)
 	int16_t uniformIndex = packedValue & 0xffff;
 	int16_t id = (packedValue >> 16) & 0xffff;
 
-	DrawColoredTriangle(uniformIndex);
+	//DrawColoredTriangle(uniformIndex);
 	lock_guard<mutex> guard(s_CurrentAPI->materialsMutex);
 	auto liveMaterial = s_CurrentAPI->GetLiveMaterialByIdLocked(id);
 	if (liveMaterial) {
