@@ -63,12 +63,27 @@ struct CompileTask {
 
 typedef map<string, ShaderProp*> PropMap;
 
+enum CompileState {
+    NeverCompiled,
+    Compiling,
+    Success,
+    Error
+};
+
+struct Stats {
+    CompileState compileState;
+    uint64_t compileTimeMs;
+    unsigned int instructionCount;
+};
+
 class LiveMaterial {
 public:
 	LiveMaterial(RenderAPI* renderAPI, int id);
 	virtual ~LiveMaterial() {}
 	int id() const { return _id; }
 
+	Stats GetStats();
+	void SetStats(Stats stats);
 	void GetFloat(const char* name, float* value);
 	void GetVector4(const char* name, float* value);
 	void GetMatrix(const char* name, float* value);
@@ -95,6 +110,8 @@ protected:
 	ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
 	ShaderProp* propForName(const char* name, PropType type);
 	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
+
+	Stats _stats = {};
 
 	RenderAPI* _renderAPI;
 	int _id;

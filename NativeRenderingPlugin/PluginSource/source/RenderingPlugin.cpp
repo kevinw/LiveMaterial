@@ -3,6 +3,7 @@
 #include "PlatformBase.h"
 #include "RenderAPI.h"
 
+
 #include <assert.h>
 #include <math.h>
 #include <map>
@@ -19,11 +20,7 @@ string GetShaderIncludePath() { return s_shaderIncludePath; }
 // --------------------------------------------------------------------------
 // SetTimeFromUnity, an example function we export which is called by one of the scripts.
 
-static float g_Time;
-
-extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API SetTimeFromUnity (float t) { g_Time = t; }
-
-
+static float g_Time = 0;
 
 // --------------------------------------------------------------------------
 // SetTextureFromUnity, an example function we export which is called by one of the scripts.
@@ -129,6 +126,8 @@ extern "C" {
 
 	void UNITY_FUNC DestroyLiveMaterial(int id) { if (s_CurrentAPI) s_CurrentAPI->DestroyLiveMaterial(id); }
 	int UNITY_FUNC GetLiveMaterialId(LiveMaterial* liveMaterial) { return liveMaterial->id(); }
+	Stats UNITY_FUNC GetStats(LiveMaterial* liveMaterial) { return liveMaterial->GetStats(); }
+	void UNITY_FUNC SetStats(LiveMaterial* liveMaterial, Stats stats) { return liveMaterial->SetStats(stats); }
 	bool UNITY_FUNC HasProperty(LiveMaterial* liveMaterial, const char* name) { return liveMaterial->HasProperty(name); }
 	void UNITY_FUNC SetDepthWritesEnabled(LiveMaterial* liveMaterial, bool enabled) { liveMaterial->SetDepthWritesEnabled(enabled); }
 	void UNITY_FUNC SetShaderSource(LiveMaterial* liveMaterial, const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry) { liveMaterial->SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry); }
@@ -149,8 +148,7 @@ extern "C" {
 	void UNITY_FUNC PrintUniforms(LiveMaterial* liveMaterial) { liveMaterial->PrintUniforms();  }
 }
 
-static void DrawColoredTriangle(int uniformIndex)
-{
+static void DrawColoredTriangle(int uniformIndex) {
 	// Draw a colored triangle. Note that colors will come out differently
 	// in D3D and OpenGL, for example, since they expect color bytes
 	// in different ordering.
@@ -179,8 +177,7 @@ static void DrawColoredTriangle(int uniformIndex)
 }
 
 
-static void ModifyTexturePixels()
-{
+static void ModifyTexturePixels() {
 	void* textureHandle = g_TextureHandle;
 	int width = g_TextureWidth;
 	int height = g_TextureHeight;
@@ -226,9 +223,7 @@ static void ModifyTexturePixels()
 }
 
 
-static void UNITY_INTERFACE_API OnRenderEvent(int packedValue)
-{
-	// Unknown / unsupported graphics device type? Do nothing
+static void UNITY_INTERFACE_API OnRenderEvent(int packedValue) {
 	if (s_CurrentAPI == nullptr)
 		return;
 

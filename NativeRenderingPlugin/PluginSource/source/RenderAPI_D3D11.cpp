@@ -36,6 +36,7 @@ struct CompileOutput {
 	ShaderType shaderType;
 	ID3DBlob *shaderBlob;
 	int inputId;
+	bool success;
 };
 
 class LiveMaterial_D3D11 : public LiveMaterial
@@ -194,7 +195,7 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 		}
 	}
 
-	//stats.instructionCount = desc.InstructionCount;
+	_stats.instructionCount = desc.InstructionCount;
 
 	{
 		lock_guard<mutex> guard(texturesMutex);
@@ -268,6 +269,14 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 
 void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 {
+	if (!output.success) {
+		_stats.compileState = CompileState::Error;
+		assert(!output.shaderBlob);
+		return;
+	}
+
+	_stats.compileState = CompileState::Success;
+
 	assert(output.shaderBlob);
 	if (output.shaderType == Fragment || output.shaderType == Compute)
 		constantBufferReflect(output.shaderBlob);
@@ -381,9 +390,6 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 	ID3DBlob *shaderBlob = nullptr;
 	ID3DBlob* errorBlob = nullptr;
 
-	//if (task.shaderType == Fragment)
-		//stats.compileState = CompileState::Compiling;
-
 	UINT flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
 
 	/*if (optimizationLevel == 0) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL0;
@@ -395,70 +401,48 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 	flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
 
 	//if (shaderDebugging) {
-		//Debug("Compiling shader with D3DCOMPILE_DEBUG");
 		//flags |= D3DCOMPILE_DEBUG;
 	//}
+
+	CompileOutput output;
+	output.shaderType = task.shaderType;
+	output.inputId = task.id;
+	output.shaderBlob = nullptr;
+	output.success = false;
 
 	auto profile = profileNameForShaderType(task.shaderType);
 	if (!profile) {
 		Debug("no profile found for shader type");
-		return false;
-	}
-
-	if (task.src.empty() || task.filename.empty() || task.entryPoint.empty()) {
+	} else if (task.src.empty() || task.filename.empty() || task.entryPoint.empty()) {
 		Debug("empty src or srcName or entryPoint");
-		return false;
-	}
-
-	//StopWatch d3dCompileWatch;
-
-	HRESULT hr = D3DCompile(
-		task.src.c_str(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-		task.entryPoint.c_str(), profile, flags, 0, &shaderBlob, &errorBlob);
-
-	if (FAILED(hr)) {
-		std::string errstr;
-		if (errorBlob) {
-			errstr = std::string((char*)errorBlob->GetBufferPointer(), errorBlob->GetBufferSize());
-			SAFE_RELEASE(errorBlob);
-		}
-		DebugSS("Could not compile shader:\n " << errstr);
-		SAFE_RELEASE(shaderBlob);
-		//stats.compileState = CompileState::Error;
 	}
 	else {
-		{
-			CompileOutput output;
-			output.shaderType = task.shaderType;
+		HRESULT hr = D3DCompile(
+			task.src.c_str(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+			task.entryPoint.c_str(), profile, flags, 0, &shaderBlob, &errorBlob);
+
+		if (FAILED(hr)) {
+			std::string errstr;
+			if (errorBlob) {
+				errstr = std::string((char*)errorBlob->GetBufferPointer(), errorBlob->GetBufferSize());
+				SAFE_RELEASE(errorBlob);
+			}
+			DebugSS("Could not compile shader:\n " << errstr);
+			SAFE_RELEASE(shaderBlob);
+		} else {
 			output.shaderBlob = shaderBlob;
-			output.inputId = task.id;
-
-			lock_guard<mutex> guard(materialsMutex);
-			auto liveMaterial = (LiveMaterial_D3D11*)GetLiveMaterialByIdLocked(task.liveMaterialId);
-			if (liveMaterial)
-				liveMaterial->QueueCompileOutput(output);
+			output.success = true;
 		}
-
-		//if (shaderType == Fragment) {
-			//stats.compileTimeMs = d3dCompileWatch.ElapsedMs();
-			//stats.compileState = CompileState::Success;
-		//}
-
-		/*
-		CompileTaskOutput output = { shaderType, shaderBlob, this->id };
-		if (!shaderCompilerOutputs.write(output)) {
-			Debug("Shader compiler output queue is full");
-		}
-		else {
-			// TODO: not necessary in release builds
-			GUARD_CALLBACK;
-			if (PluginCallbackFunc)
-				PluginCallbackFunc(NeedsSceneViewRepaint);
-		}
-		*/
 	}
 
-	return !FAILED(hr);
+	{
+		lock_guard<mutex> guard(materialsMutex);
+		auto liveMaterial = (LiveMaterial_D3D11*)GetLiveMaterialByIdLocked(task.liveMaterialId);
+		if (liveMaterial)
+			liveMaterial->QueueCompileOutput(output);
+	}
+
+	return output.success;
 }
 
 RenderAPI* CreateRenderAPI_D3D11() { return new RenderAPI_D3D11(); }

@@ -254,8 +254,15 @@ void LiveMaterial::SetShaderSource(
 		tasks.push_back(task);
 	}
 
+	if (tasks.size() > 0) {
+		_stats.compileState = CompileState::Compiling;
+	}
+
 	_renderAPI->QueueCompileTasks(tasks);
 }
+
+Stats LiveMaterial::GetStats() { return _stats; }
+void LiveMaterial::SetStats(Stats stats) { _stats = stats; }
 
 void LiveMaterial::PrintUniforms() {
 	lock_guard<mutex> guard(uniformsMutex);
