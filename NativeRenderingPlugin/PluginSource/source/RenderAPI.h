@@ -80,6 +80,7 @@ public:
 	void SetTexturePtr(const char* name, int id, void* nativeTexturePointer);
 	void SubmitUniforms(int uniformsIndex);
 	bool HasProperty(const char* name);
+	virtual void SetDepthWritesEnabled(bool enabled);
 	void PrintUniforms();
 	void setproparray(const char* name, PropType type, float* value, int numFloats);
 	void getproparray(const char* name, PropType type, float* value, int numFloats);
@@ -126,14 +127,12 @@ class RenderAPI
 public:
 	void Initialize();
 	void runCompileFunc();
-	virtual ~RenderAPI() { }
+	virtual ~RenderAPI();
 
 	virtual void DrawMaterials(int uniformIndex);
 
 	// Process general event like initialization, shutdown, device loss/reset etc.
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces) = 0;
-
-	virtual void DidDestroy(LiveMaterial* liveMaterial);
 
 	// Draw some triangle geometry, using some simple rendering state.
 	// Upon call into our plug-in the render state can be almost completely arbitrary depending

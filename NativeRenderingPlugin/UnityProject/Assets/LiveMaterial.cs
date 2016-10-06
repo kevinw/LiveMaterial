@@ -9,7 +9,6 @@ using UnityEditor;
 
 using Random = UnityEngine.Random;
 
-
 public class LiveMaterial : MonoBehaviour
 {
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate void DebugLogFunc(string str);
@@ -22,8 +21,7 @@ public class LiveMaterial : MonoBehaviour
         [DllImport(PluginName)] internal static extern void SetCallbackFunctions(IntPtr debugLogFunc);
 
         [DllImport(PluginName)] internal static extern IntPtr CreateLiveMaterial();
-        [DllImport(PluginName)]
-        internal static extern int GetLiveMaterialId(IntPtr nativePtr);
+        [DllImport(PluginName)] internal static extern int GetLiveMaterialId(IntPtr nativePtr);
         [DllImport(PluginName)] internal static extern void DestroyLiveMaterial(IntPtr nativePtr);
         [DllImport(PluginName)] internal static extern void SetShaderSource(IntPtr nativePtr, string fragSrc, string fragEntry, string vertSrc, string vertEntry);
         [DllImport(PluginName)] internal static extern bool SetTextureID(IntPtr nativePtr, string name, int id);
@@ -46,6 +44,7 @@ public class LiveMaterial : MonoBehaviour
     const int ID_UNSET = -1;
     const int ID_DESTROYED = -2;
     int _nativeId = ID_UNSET;
+
     IntPtr _nativePtr = IntPtr.Zero;
     static IntPtr DELETED_PTR = new IntPtr(-1);
 

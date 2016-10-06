@@ -109,6 +109,9 @@ static ShaderProp* _lookupPropByName(const PropMap& props, const char* name) {
 	return i != props.end() ? i->second : nullptr;
 }
 
+void LiveMaterial::SetDepthWritesEnabled(bool enabled) {
+}
+
 bool LiveMaterial::HasProperty(const char* name) {
 	lock_guard<mutex> guard(uniformsMutex);
 	return _lookupPropByName(shaderProps, name) != nullptr;
@@ -314,6 +317,15 @@ bool RenderAPI::compileShader(CompileTask task) {
 
 void RenderAPI::compileThreadFunc(RenderAPI * renderAPI) { renderAPI->runCompileFunc(); }
 
+RenderAPI::~RenderAPI() {
+	lock_guard<mutex> guard(materialsMutex);
+	for (auto iter = liveMaterials.begin(); iter != liveMaterials.end(); iter++) {
+		auto liveMaterial = iter->second;
+		delete liveMaterial;
+	}
+	liveMaterials.clear();
+}
+
 bool RenderAPI::DestroyLiveMaterial(int id) {
 	lock_guard<mutex> guard(materialsMutex);
 
@@ -325,12 +337,8 @@ bool RenderAPI::DestroyLiveMaterial(int id) {
 	assert(liveMaterial->id() == id);
 
 	liveMaterials.erase(id);
-	DidDestroy(liveMaterial);
 	delete liveMaterial;
 	return true;
-}
-
-void RenderAPI::DidDestroy(LiveMaterial* liveMaterial) {
 }
 
 LiveMaterial * RenderAPI::GetLiveMaterialById(int id)

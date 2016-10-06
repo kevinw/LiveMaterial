@@ -43,7 +43,14 @@ class LiveMaterial_D3D11 : public LiveMaterial
 public:
 	LiveMaterial_D3D11(RenderAPI* renderAPI, int id)
 		: LiveMaterial(renderAPI, id)
-	{}
+	{
+		D3D11_DEPTH_STENCIL_DESC dsdesc;
+		memset(&dsdesc, 0, sizeof(dsdesc));
+		dsdesc.DepthEnable = TRUE;
+		dsdesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		dsdesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		device()->CreateDepthStencilState(&dsdesc, &_depthState);
+	}
 
 	virtual ~LiveMaterial_D3D11() {
 		SAFE_RELEASE(_pixelShader);
@@ -51,6 +58,7 @@ public:
 		SAFE_RELEASE(_computeShader);
 		SAFE_RELEASE(_deviceConstantBuffer);
 		SAFE_RELEASE(_samplerState);
+		SAFE_RELEASE(_depthState);
 
 		{ // Cleanup textures
 			lock_guard<mutex> guard(texturesMutex);
@@ -72,6 +80,7 @@ public:
 	}
 
 	void QueueCompileOutput(CompileOutput& output);
+	virtual void SetDepthWritesEnabled(bool enabled);
 
 	virtual void Draw(int uniformIndex);
 	void DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
@@ -109,6 +118,7 @@ protected:
 	ID3D11VertexShader* _vertexShader = nullptr;
 	ID3D11ComputeShader* _computeShader = nullptr;
 	ID3D11SamplerState* _samplerState = nullptr;
+	ID3D11DepthStencilState* _depthState = nullptr;
 
 	// Resource Views (textures)
 	vector<ID3D11ShaderResourceView*> resourceViews;
@@ -143,6 +153,9 @@ static int roundUp(int numToRound, int multiple) {
 	return ((numToRound + isPositive * (multiple - 1)) / multiple) * multiple;
 }
 
+void LiveMaterial_D3D11::SetDepthWritesEnabled(bool enabled) {
+
+}
 
 void LiveMaterial_D3D11::_SetTexture(const char* name, void* nativeTexturePtr) {
 	lock_guard<mutex> guard(texturesMutex);
@@ -749,6 +762,9 @@ void LiveMaterial_D3D11::updateUniforms(ID3D11DeviceContext* ctx, int uniformInd
 
 void LiveMaterial_D3D11::DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex) {
 	vector<CompileOutput> outputs;
+
+	if (_depthState)
+		ctx->OMSetDepthStencilState(_depthState, 0);
 
 	{
 		lock_guard<mutex> guard(compileOutputMutex);

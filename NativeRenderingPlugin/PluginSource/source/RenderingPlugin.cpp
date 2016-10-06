@@ -109,7 +109,7 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 	// Cleanup graphics API implementation upon shutdown
 	if (eventType == kUnityGfxDeviceEventShutdown) {
 		delete s_CurrentAPI;
-		s_CurrentAPI = NULL;
+		s_CurrentAPI = nullptr;
 		s_DeviceType = kUnityGfxRendererNull;
 	}
 }
@@ -120,7 +120,6 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 typedef LiveMaterial* NativePtr;
 
 extern "C" {
-
 	void UNITY_FUNC SetShaderIncludePath(const char* includePath) { s_shaderIncludePath = includePath; }
 
 	NativePtr UNITY_FUNC CreateLiveMaterial() {
@@ -128,9 +127,10 @@ extern "C" {
 		return s_CurrentAPI->CreateLiveMaterial();
 	}
 
-	void UNITY_FUNC DestroyLiveMaterial(LiveMaterial* liveMaterial) { s_CurrentAPI->DestroyLiveMaterial(liveMaterial->id()); }
+	void UNITY_FUNC DestroyLiveMaterial(int id) { if (s_CurrentAPI) s_CurrentAPI->DestroyLiveMaterial(id); }
 	int UNITY_FUNC GetLiveMaterialId(LiveMaterial* liveMaterial) { return liveMaterial->id(); }
 	bool UNITY_FUNC HasProperty(LiveMaterial* liveMaterial, const char* name) { return liveMaterial->HasProperty(name); }
+	void UNITY_FUNC SetDepthWritesEnabled(LiveMaterial* liveMaterial, bool enabled) { liveMaterial->SetDepthWritesEnabled(enabled); }
 	void UNITY_FUNC SetShaderSource(LiveMaterial* liveMaterial, const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry) { liveMaterial->SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry); }
 	void UNITY_FUNC SubmitUniforms(LiveMaterial* liveMaterial, int uniformsIndex) { liveMaterial->SubmitUniforms(uniformsIndex); }
 	bool UNITY_FUNC SetTextureID(LiveMaterial* liveMaterial, const char* name, int id) { return liveMaterial->SetTextureID(name, id); }
@@ -229,7 +229,7 @@ static void ModifyTexturePixels()
 static void UNITY_INTERFACE_API OnRenderEvent(int packedValue)
 {
 	// Unknown / unsupported graphics device type? Do nothing
-	if (s_CurrentAPI == NULL)
+	if (s_CurrentAPI == nullptr)
 		return;
 
 	int16_t uniformIndex = packedValue & 0xffff;
@@ -240,6 +240,9 @@ static void UNITY_INTERFACE_API OnRenderEvent(int packedValue)
 	auto liveMaterial = s_CurrentAPI->GetLiveMaterialByIdLocked(id);
 	if (liveMaterial) {
 		liveMaterial->Draw(uniformIndex);
+	}
+	else {
+		DebugSS("not drawing: id: " << id << ", uniformIndex: " << uniformIndex);
 	}
 	//ModifyTexturePixels();
 }
