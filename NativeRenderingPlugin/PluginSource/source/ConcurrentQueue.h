@@ -19,6 +19,14 @@ class Queue
     queue_.pop();
     return item;
   }
+
+  size_t approximate_size() {
+	  size_t size;
+	  std::unique_lock<std::mutex> mlock(mutex_);
+	  size = queue_.size();
+	  mlock.unlock();
+	  return size;
+  }
  
   void pop(T& item) {
     std::unique_lock<std::mutex> mlock(mutex_);

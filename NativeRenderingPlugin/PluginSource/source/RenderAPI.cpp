@@ -56,6 +56,11 @@ void LiveMaterial::getproparray_locked(const char* name, PropType type, float* v
 
 void LiveMaterial::Draw(int uniformIndex) { }
 
+bool LiveMaterial::NeedsRender()
+{
+	return false;
+}
+
 void LiveMaterial::SetFloat(const char * name, float value) { setproparray(name, PropType::Float, &value, 1); }
 void LiveMaterial::SetVector4(const char * name, float* value) { setproparray(name, PropType::Vector4, value, 4); }
 void LiveMaterial::SetMatrix(const char * name, float * value) { setproparray(name, PropType::Matrix, value, 16); }
@@ -234,6 +239,7 @@ void LiveMaterial::SetShaderSource(
 
 	if (fragSrc && strlen(fragSrc) > 0) {
 		CompileTask task;
+		task.quitting = false;
 		task.shaderType = Fragment;
 		task.src = fragSrc;
 		task.entryPoint = fragEntry;
@@ -245,6 +251,7 @@ void LiveMaterial::SetShaderSource(
 
 	if (vertSrc && strlen(vertSrc) > 0) {
 		CompileTask task;
+		task.quitting = false;
 		task.shaderType = Vertex;
 		task.src = vertSrc;
 		task.entryPoint = vertEntry;
@@ -301,15 +308,48 @@ void LiveMaterial::SetComputeSource(
 	assert(false);
 }
 
+static Queue<CompileTask> compileQueue;
+
 void RenderAPI::Initialize() {
-	compileThread = new thread(compileThreadFunc, this);
-	compileThread->detach();
+	thread compileThread(compileThreadFunc, this);
+	compileThread.detach();
 }
 
+RenderAPI::~RenderAPI() {
+	{
+		lock_guard<mutex> guard(materialsMutex);
+		for (auto iter = liveMaterials.begin(); iter != liveMaterials.end(); iter++) {
+			auto liveMaterial = iter->second;
+			delete liveMaterial;
+		}
+		liveMaterials.clear();
+	}
+
+	{
+		CompileTask task;
+		task.quitting = true;
+		compileQueue.push(task);
+	}
+}
+
+
 void RenderAPI::runCompileFunc() {
-	while (true) {
+	bool quitting = true;
+	while (quitting) {
 		auto compileTask = compileQueue.pop();
-		compileShader(compileTask);
+		if (compileTask.quitting)
+			quitting = true;
+		else
+			compileShader(compileTask);
+	}
+}
+
+void RenderAPI::GetDebugInfo(int * numCompileTasks, int * numLiveMaterials)
+{
+	*numCompileTasks = (int)compileQueue.approximate_size();
+	{
+		lock_guard<mutex> guard(materialsMutex);
+		*numLiveMaterials = static_cast<int>(liveMaterials.size());
 	}
 }
 
@@ -323,15 +363,6 @@ bool RenderAPI::compileShader(CompileTask task) {
 }
 
 void RenderAPI::compileThreadFunc(RenderAPI * renderAPI) { renderAPI->runCompileFunc(); }
-
-RenderAPI::~RenderAPI() {
-	lock_guard<mutex> guard(materialsMutex);
-	for (auto iter = liveMaterials.begin(); iter != liveMaterials.end(); iter++) {
-		auto liveMaterial = iter->second;
-		delete liveMaterial;
-	}
-	liveMaterials.clear();
-}
 
 bool RenderAPI::DestroyLiveMaterial(int id) {
 	lock_guard<mutex> guard(materialsMutex);

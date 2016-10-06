@@ -86,6 +86,8 @@ public:
 	virtual void Draw(int uniformIndex);
 	void DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
 
+	virtual bool NeedsRender();
+
 	void updateD3D11Shader(CompileOutput output);
 	void constantBufferReflect(ID3DBlob* shaderBlob);
 
@@ -152,6 +154,14 @@ static int roundUp(int numToRound, int multiple) {
 	assert(multiple);
 	int isPositive = (int)(numToRound >= 0);
 	return ((numToRound + isPositive * (multiple - 1)) / multiple) * multiple;
+}
+
+bool LiveMaterial_D3D11::NeedsRender() {
+	lock_guard<mutex> guard(compileOutputMutex);
+	for (size_t i = 0; i < compileOutput.size(); ++i)
+		if (compileOutput[i].success)
+			return true;
+	return false;
 }
 
 void LiveMaterial_D3D11::SetDepthWritesEnabled(bool enabled) {
@@ -767,6 +777,9 @@ void LiveMaterial_D3D11::DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex) {
 		ctx->PSSetConstantBuffers(0, 1, &_deviceConstantBuffer);
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 		ctx->Draw(4, 0);
+	}
+	else {
+		//DebugSS("Can't draw, no pixel or vertex shader in (id=" << id() << ", ptr=" << this << ")");
 	}
 }
 

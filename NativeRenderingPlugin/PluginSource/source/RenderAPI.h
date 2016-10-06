@@ -59,6 +59,7 @@ struct CompileTask {
 	string entryPoint;
 	int liveMaterialId;
 	int id;
+	bool quitting;
 };
 
 typedef map<string, ShaderProp*> PropMap;
@@ -101,6 +102,8 @@ public:
 	void getproparray(const char* name, PropType type, float* value, int numFloats);
 	void getproparray_locked(const char* name, PropType type, float* value, int numFloats);
 	virtual void Draw(int uniformIndex);
+
+	virtual bool NeedsRender();
 
 
 	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
@@ -146,6 +149,7 @@ public:
 	void runCompileFunc();
 	virtual ~RenderAPI();
 
+	void GetDebugInfo(int* numCompileTasks, int* numLiveMaterials);
 	virtual void DrawMaterials(int uniformIndex);
 
 	// Process general event like initialization, shutdown, device loss/reset etc.
@@ -182,9 +186,6 @@ protected:
 
 	int liveMaterialCount = 0;
 	map<int, LiveMaterial*> liveMaterials;
-
-	Queue<CompileTask> compileQueue;
-	thread* compileThread = nullptr;
 
 	static void compileThreadFunc(RenderAPI* renderAPI);
 	friend static void compileThreadFunc(RenderAPI* renderAPI);

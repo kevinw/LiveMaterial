@@ -3,7 +3,6 @@
 #include "PlatformBase.h"
 #include "RenderAPI.h"
 
-
 #include <assert.h>
 #include <math.h>
 #include <map>
@@ -124,11 +123,18 @@ extern "C" {
 		return s_CurrentAPI->CreateLiveMaterial();
 	}
 
+
+	int UNITY_FUNC CreateLiveMaterialId() {
+		auto liveMaterial = CreateLiveMaterial();
+		return liveMaterial ? liveMaterial->id() : -1;
+	}
+
+	NativePtr UNITY_FUNC GetLiveMaterialPtr(int id) { return s_CurrentAPI ? s_CurrentAPI->GetLiveMaterialById(id) : nullptr; }
 	void UNITY_FUNC DestroyLiveMaterial(int id) { if (s_CurrentAPI) s_CurrentAPI->DestroyLiveMaterial(id); }
-	int UNITY_FUNC GetLiveMaterialId(LiveMaterial* liveMaterial) { return liveMaterial->id(); }
-	Stats UNITY_FUNC GetStats(LiveMaterial* liveMaterial) { return liveMaterial->GetStats(); }
+	Stats UNITY_FUNC GetStats(LiveMaterial* liveMaterial) { return liveMaterial ? liveMaterial->GetStats() : Stats{}; }
 	void UNITY_FUNC SetStats(LiveMaterial* liveMaterial, Stats stats) { return liveMaterial->SetStats(stats); }
 	bool UNITY_FUNC HasProperty(LiveMaterial* liveMaterial, const char* name) { return liveMaterial->HasProperty(name); }
+	bool UNITY_FUNC NeedsRender(LiveMaterial* liveMaterial) { return liveMaterial->NeedsRender(); }
 	void UNITY_FUNC SetDepthWritesEnabled(LiveMaterial* liveMaterial, bool enabled) { liveMaterial->SetDepthWritesEnabled(enabled); }
 	void UNITY_FUNC SetShaderSource(LiveMaterial* liveMaterial, const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry) { liveMaterial->SetShaderSource(fragSrc, fragEntry, vertSrc, vertEntry); }
 	void UNITY_FUNC SubmitUniforms(LiveMaterial* liveMaterial, int uniformsIndex) { liveMaterial->SubmitUniforms(uniformsIndex); }
@@ -146,6 +152,10 @@ extern "C" {
 		return value;
 	}
 	void UNITY_FUNC PrintUniforms(LiveMaterial* liveMaterial) { liveMaterial->PrintUniforms();  }
+	void UNITY_FUNC GetDebugInfo(int* numCompileTasks, int* numLiveMaterials) {
+		if (s_CurrentAPI)
+			s_CurrentAPI->GetDebugInfo(numCompileTasks, numLiveMaterials);
+	}
 }
 
 static void DrawColoredTriangle(int uniformIndex) {
@@ -229,6 +239,8 @@ static void UNITY_INTERFACE_API OnRenderEvent(int packedValue) {
 
 	int16_t uniformIndex = packedValue & 0xffff;
 	int16_t id = (packedValue >> 16) & 0xffff;
+
+	//DebugSS("OnRenderEvent(id=" << id << ", uniformIndex=" << uniformIndex << ")");
 
 	//DrawColoredTriangle(uniformIndex);
 	lock_guard<mutex> guard(s_CurrentAPI->materialsMutex);
