@@ -1,4 +1,5 @@
 #pragma once
+#include "PlatformBase.h"
 
 enum PropType {
 	Float,

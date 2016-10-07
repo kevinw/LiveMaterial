@@ -110,6 +110,8 @@ public:
 	void SetComputeSource(const char* source, const char* entryPoint);
 
 protected:
+    virtual void _QueueCompileTasks(vector<CompileTask> tasks);
+
 	ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
 	ShaderProp* propForName(const char* name, PropType type);
 	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
@@ -178,17 +180,18 @@ public:
 	LiveMaterial* GetLiveMaterialById(int id);
 	LiveMaterial* GetLiveMaterialByIdLocked(int id);
 
-	void QueueCompileTasks(vector<CompileTask> tasks);
+	virtual void QueueCompileTasks(vector<CompileTask> tasks);
 	mutex materialsMutex;
 
 protected:
+    virtual bool supportsBackgroundCompiles();
 	virtual bool compileShader(CompileTask compileTask);
 
 	int liveMaterialCount = 0;
 	map<int, LiveMaterial*> liveMaterials;
 
 	static void compileThreadFunc(RenderAPI* renderAPI);
-	friend static void compileThreadFunc(RenderAPI* renderAPI);
+	friend void compileThreadFunc(RenderAPI* renderAPI);
 
 	virtual LiveMaterial* _newLiveMaterial(int id);
 
