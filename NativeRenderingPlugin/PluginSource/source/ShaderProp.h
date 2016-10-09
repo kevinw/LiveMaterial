@@ -1,4 +1,6 @@
 #pragma once
+#include "PlatformBase.h"
+#include <assert.h>
 
 enum PropType {
 	Float,
@@ -70,6 +72,7 @@ struct ShaderProp {
 		case Vector3: return 3 * sizeof(float);
 		case Vector4: return 4 * sizeof(float);
 		case Matrix: return 16 * sizeof(float);
+		default: assert(false); return 0;
 		}
 	}
 };

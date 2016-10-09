@@ -3,6 +3,7 @@
 #include "Unity/IUnityGraphics.h"
 
 #include <assert.h>
+#include <math.h>
 
 const char* shaderTypeName(ShaderType shaderType) {
 	switch (shaderType) {
@@ -269,7 +270,11 @@ void LiveMaterial::SetShaderSource(
 		_stats.compileState = CompileState::Compiling;
 	}
 
-	_renderAPI->QueueCompileTasks(tasks);
+	_QueueCompileTasks(tasks);
+}
+
+void LiveMaterial::_QueueCompileTasks(vector<CompileTask> compileTasks) {
+	_renderAPI->QueueCompileTasks(compileTasks);
 }
 
 Stats LiveMaterial::GetStats() { return _stats; }
@@ -314,9 +319,15 @@ void LiveMaterial::SetComputeSource(
 
 static Queue<CompileTask> compileQueue;
 
+bool RenderAPI::supportsBackgroundCompiles() {
+	return true;
+}
+
 void RenderAPI::Initialize() {
-	thread compileThread(compileThreadFunc, this);
-	compileThread.detach();
+	if (supportsBackgroundCompiles()) {
+		thread compileThread(compileThreadFunc, this);
+		compileThread.detach();
+	}
 }
 
 RenderAPI::~RenderAPI() {
