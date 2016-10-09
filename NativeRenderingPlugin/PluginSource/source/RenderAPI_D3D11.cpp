@@ -246,9 +246,36 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 				D3D11_SHADER_VARIABLE_DESC var_desc;
 				pVariable->GetDesc(&var_desc);
 
-				// mark the prop's name, size and offset
-				propForNameSizeOffset(var_desc.Name, var_desc.Size, var_desc.StartOffset);
-				_deviceConstantBufferSize = max(_deviceConstantBufferSize, var_desc.StartOffset + var_desc.Size);
+				auto var_type = pVariable->GetType();
+
+				D3D11_SHADER_TYPE_DESC type_desc;
+				auto typeHR = var_type->GetDesc(&type_desc);
+				assert(!FAILED(typeHR));
+				string typeName = type_desc.Name;
+
+				PropType propType;
+				if      (typeName == "float4")   propType = PropType::Vector4;
+				else if (typeName == "float3")   propType = PropType::Vector3;
+				else if (typeName == "float2")   propType = PropType::Vector2;
+				else if (typeName == "float")    propType = PropType::Float;
+				else if (typeName == "float4x4") propType = PropType::Matrix;
+				else assert(false);
+
+				int arraySize = type_desc.Elements > 0 ? type_desc.Elements : 1;
+
+				assert(shaderProps.find(var_desc.Name) == shaderProps.end());
+
+				auto prop = shaderProps[var_desc.Name] = new ShaderProp(propType, var_desc.Name);
+				prop->offset = var_desc.StartOffset;
+				prop->size = ShaderProp::sizeForType(propType);
+				prop->arraySize = arraySize;
+				assert(prop->size * prop->arraySize == var_desc.Size);
+
+				int totalSize = prop->arraySize * prop->size;
+				if (arraySize > 1) {
+					DebugSS("prop " << prop->name << " has size " << prop->size << " and array size of " << prop->arraySize << " for a total of " << totalSize);
+				}
+				_deviceConstantBufferSize = max(_deviceConstantBufferSize, var_desc.StartOffset + totalSize);
 			}
 
 			if (_deviceConstantBufferSize > 0) {
