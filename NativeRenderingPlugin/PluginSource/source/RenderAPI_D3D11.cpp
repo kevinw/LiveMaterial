@@ -473,10 +473,13 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 	}
 
 	{
-		lock_guard<mutex> guard(materialsMutex);
-		auto liveMaterial = (LiveMaterial_D3D11*)GetLiveMaterialByIdLocked(task.liveMaterialId);
-		if (liveMaterial)
-			liveMaterial->QueueCompileOutput(output);
+		lock_guard<mutex> renderAPIGuard(renderAPIMutex);
+		if (GetCurrentRenderAPI()) {
+			lock_guard<mutex> guard(materialsMutex);
+			auto liveMaterial = (LiveMaterial_D3D11*)GetLiveMaterialByIdLocked(task.liveMaterialId);
+			if (liveMaterial)
+				liveMaterial->QueueCompileOutput(output);
+		}
 	}
 
 	return output.success;

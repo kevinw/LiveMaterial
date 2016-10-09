@@ -145,9 +145,9 @@
       <Command>SETLOCAL
 
 if "$(PlatformShortName)" == "x86" (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\..\UnityProject\Assets\Plugins\x86
+  set TARGET_PLUGIN_PATH=$(RAYMARCHER)\Assets\Plugins\x86
 ) else (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\..\UnityProject\Assets\Plugins\x86_64
+  set TARGET_PLUGIN_PATH=$(RAYMARCHER)\Assets\Plugins\x86_64
 )
 echo Target Plugin Path is %TARGET_PLUGIN_PATH%
 copy /Y "$(TargetPath)" "%TARGET_PLUGIN_PATH%\$(TargetFileName)"
@@ -179,9 +179,9 @@ ENDLOCAL
       <Command>SETLOCAL
 
 if "$(PlatformShortName)" == "x86" (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\..\UnityProject\Assets\Plugins\x86
+  set TARGET_PLUGIN_PATH=$(RAYMARCHER)\Assets\Plugins\x86
 ) else (
-  set TARGET_PLUGIN_PATH=$(SolutionDir)..\..\..\UnityProject\Assets\Plugins\x86_64
+  set TARGET_PLUGIN_PATH=$(RAYMARCHER)\Assets\Plugins\x86_64
 )
 echo Target Plugin Path is %TARGET_PLUGIN_PATH%
 copy /Y "$(TargetPath)" "%TARGET_PLUGIN_PATH%\$(TargetFileName)"

@@ -77,6 +77,9 @@ struct Stats {
     unsigned int instructionCount;
 };
 
+extern mutex renderAPIMutex;
+RenderAPI* GetCurrentRenderAPI();
+
 class LiveMaterial {
 public:
 	LiveMaterial(RenderAPI* renderAPI, int id);
@@ -91,7 +94,8 @@ public:
 	void SetFloat(const char* name, float value);
 	void SetVector4(const char* name, float* value);
 	void SetMatrix(const char* name, float* value);
-	void SetFloatArray(const char* name, float* value, int numFloats);
+	void SetVectorArray(const char* name, float* values, int numVector4s);
+	void SetFloatArray(const char* name, float* value, int numElems);
 	bool SetTextureID(const char* name, int id);
 	void SetTexturePtr(const char* name, int id, void* nativeTexturePointer);
 	void SubmitUniforms(int uniformsIndex);

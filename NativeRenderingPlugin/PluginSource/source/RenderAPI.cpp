@@ -27,30 +27,30 @@ void LiveMaterial::SubmitUniforms(int uniformIndex) {
 		memcpy(_gpuBuffer + _constantBufferSize * uniformIndex, _constantBuffer, _constantBufferSize);
 }
 
-void LiveMaterial::setproparray(const char* name, PropType type, float* value, int numFloats) {
+void LiveMaterial::setproparray(const char* name, PropType type, float* value, int numElems) {
     lock_guard<mutex> guard(uniformsMutex);
 
-    if (!_constantBuffer) return;
+    if (!_constantBuffer || numElems < 1) return;
 
     auto prop = propForName(name, type);
     if (!prop) return;
     
-	size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, prop->size * prop->arraySize);
+	size_t bytesToCopy = prop->size * (int)fmin(numElems, prop->arraySize);
 	memcpy(_constantBuffer + prop->offset, value, bytesToCopy);
 }
 
-void LiveMaterial::getproparray(const char* name, PropType type, float* value, int numFloats) {
+void LiveMaterial::getproparray(const char* name, PropType type, float* value, int numElems) {
 	lock_guard<mutex> guard(uniformsMutex);
-	getproparray_locked(name, type, value, numFloats);
+	getproparray_locked(name, type, value, numElems);
 }
 
-void LiveMaterial::getproparray_locked(const char* name, PropType type, float* value, int numFloats) {
-    if (!_constantBuffer) return;
+void LiveMaterial::getproparray_locked(const char* name, PropType type, float* value, int numElems) {
+    if (!_constantBuffer || numElems < 1) return;
 
     auto prop = propForName(name, type);
     if (!prop) return;
     
-	size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, prop->size * prop->arraySize);
+	size_t bytesToCopy = prop->size * (int)fmin(numElems, prop->arraySize);
 	memcpy(value, _constantBuffer + prop->offset, bytesToCopy);
 }
 
@@ -62,11 +62,15 @@ bool LiveMaterial::NeedsRender()
 }
 
 void LiveMaterial::SetFloat(const char * name, float value) { setproparray(name, PropType::Float, &value, 1); }
-void LiveMaterial::SetVector4(const char * name, float* value) { setproparray(name, PropType::Vector4, value, 4); }
-void LiveMaterial::SetMatrix(const char * name, float * value) { setproparray(name, PropType::Matrix, value, 16); }
+void LiveMaterial::SetVector4(const char * name, float* value) { setproparray(name, PropType::Vector4, value, 1); }
+void LiveMaterial::SetMatrix(const char * name, float * value) { setproparray(name, PropType::Matrix, value, 1); }
 
 void LiveMaterial::SetFloatArray(const char * name, float * value, int numFloats) {
 	setproparray(name, PropType::FloatBlock, value, numFloats);
+}
+
+void LiveMaterial::SetVectorArray(const char* name, float* values, int numVector4s) {
+	setproparray(name, PropType::Vector4, values, numVector4s);
 }
 
 bool LiveMaterial::SetTextureID(const char * name, int id)
@@ -106,8 +110,8 @@ void LiveMaterial::_SetTexture(const char* name, void* nativeTexturePointer) {
 }
 
 void LiveMaterial::GetFloat(const char * name, float* value) { getproparray(name, PropType::Float, value, 1); }
-void LiveMaterial::GetVector4(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 4); }
-void LiveMaterial::GetMatrix(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 16); }
+void LiveMaterial::GetVector4(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 1); }
+void LiveMaterial::GetMatrix(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 1); }
 
 static ShaderProp* _lookupPropByName(const PropMap& props, const char* name) {
 	auto i = props.find(name);
@@ -337,7 +341,7 @@ void RenderAPI::runCompileFunc() {
 	bool quitting = true;
 	while (quitting) {
 		auto compileTask = compileQueue.pop();
-		if (compileTask.quitting)
+		if (compileTask.quitting) // TODO: signal some other way
 			quitting = true;
 		else
 			compileShader(compileTask);

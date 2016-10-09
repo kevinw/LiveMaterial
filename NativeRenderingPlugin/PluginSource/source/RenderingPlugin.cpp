@@ -92,9 +92,12 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 	// Create graphics API implementation upon initialization
 	if (eventType == kUnityGfxDeviceEventInitialize) {
 		assert(s_CurrentAPI == NULL);
-		s_DeviceType = s_Graphics->GetRenderer();
-		s_CurrentAPI = CreateRenderAPI(s_DeviceType);
-		s_CurrentAPI->Initialize();
+		{
+			lock_guard<mutex> guard(renderAPIMutex);
+			s_DeviceType = s_Graphics->GetRenderer();
+			s_CurrentAPI = CreateRenderAPI(s_DeviceType);
+			s_CurrentAPI->Initialize();
+		}
 	}
 
 	// Let the implementation process the device related events
@@ -104,9 +107,13 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 
 	// Cleanup graphics API implementation upon shutdown
 	if (eventType == kUnityGfxDeviceEventShutdown) {
-		delete s_CurrentAPI;
-		s_CurrentAPI = nullptr;
-		s_DeviceType = kUnityGfxRendererNull;
+		{
+			lock_guard<mutex> guard(renderAPIMutex);
+			auto api = s_CurrentAPI;
+			s_CurrentAPI = nullptr;
+			delete api;
+			s_DeviceType = kUnityGfxRendererNull;
+		}
 	}
 }
 
@@ -144,6 +151,7 @@ extern "C" {
 	void UNITY_FUNC SetVector4(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetVector4(name, value); }
 	void UNITY_FUNC SetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetMatrix(name, value); }
 	void UNITY_FUNC SetFloatArray(LiveMaterial* liveMaterial, const char* name, float* value, int numFloats) { liveMaterial->SetFloatArray(name, value, numFloats); }
+	void UNITY_FUNC SetVectorArray(LiveMaterial* liveMaterial, const char* name, float* values, int numVector4s) { liveMaterial->SetVectorArray(name, values, numVector4s); }
 	void UNITY_FUNC GetVector4(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->GetVector4(name, value); }
 	void UNITY_FUNC GetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->GetMatrix(name, value); }
 	float UNITY_FUNC GetFloat(LiveMaterial* liveMaterial, const char* name) {
@@ -157,6 +165,9 @@ extern "C" {
 			s_CurrentAPI->GetDebugInfo(numCompileTasks, numLiveMaterials);
 	}
 }
+
+mutex renderAPIMutex;
+RenderAPI* GetCurrentRenderAPI() { return s_CurrentAPI; }
 
 static void DrawColoredTriangle(int uniformIndex) {
 	// Draw a colored triangle. Note that colors will come out differently
