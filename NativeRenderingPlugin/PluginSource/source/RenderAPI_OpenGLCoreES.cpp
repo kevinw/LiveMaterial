@@ -1,6 +1,9 @@
 #include "RenderAPI.h"
 #include "PlatformBase.h"
 
+#include <iostream>
+#include <fstream>
+
 // OpenGL Core profile (desktop) or OpenGL ES (mobile) implementation of RenderAPI.
 // Supports several flavors: Core, ES2, ES3
 
@@ -17,6 +20,72 @@
 #	include "GLEW/glew.h"
 #endif
 
+#define printOpenGLError() printOglError(__FILE__, __LINE__)
+
+int printOglError(const char *file, int line) {
+    GLenum glErr = glGetError();
+    if (glErr == GL_NO_ERROR)
+        return 0;
+    
+    const int SIZE = 1024 * 5;
+    char buffer [SIZE];
+
+    snprintf(buffer, SIZE, "glError in %s:%d: %s\n",
+           file, line, gluErrorString(glErr));
+    Debug(buffer);
+    return 1;
+}
+
+struct CompileOutput {
+  ShaderType shaderType;
+  GLint program;
+  int inputId;
+  bool success;
+};
+
+class LiveMaterial_GL : public LiveMaterial {
+public:
+    LiveMaterial_GL(RenderAPI* renderAPI, int id)
+        : LiveMaterial(renderAPI, id)
+          , _vertexShader(0)
+          , _fragmentShader(0)
+          , _program(0)
+    {
+    }
+
+    virtual ~LiveMaterial_GL() {
+    }
+
+    virtual void Draw(int uniformIndex);
+    virtual bool NeedsRender();
+    virtual void _SetTexture(const char* name, void* nativeTexturePtr);
+
+protected:
+    virtual void _QueueCompileTasks(vector<CompileTask> tasks);
+    void _discoverUniforms(GLuint program);
+
+    void updateUniforms(int uniformsIndex);
+    void compileNewShaders();
+    void LinkProgram();
+
+	GLuint _vertexShader;
+	GLuint _fragmentShader;
+	GLuint _program;
+
+    // Textures
+    vector<GLint> textureIDs;
+    vector<GLint> uniformLocs;
+    map<string, size_t> textureUnits;
+
+	// Compile outputs
+	mutex compileOutputMutex;
+	vector<CompileOutput> compileOutput;
+    
+    // Compile inputs
+    mutex compileTaskMutex;
+    vector<CompileTask> compileTasks;
+};
+
 
 class RenderAPI_OpenGLCoreES : public RenderAPI
 {
@@ -30,6 +99,13 @@ public:
 
 	virtual void* BeginModifyTexture(void* textureHandle, int textureWidth, int textureHeight, int* outRowPitch);
 	virtual void EndModifyTexture(void* textureHandle, int textureWidth, int textureHeight, int rowPitch, void* dataPtr);
+    
+    bool IsOpenGLCore() const { return m_APIType == kUnityGfxRendererOpenGLCore; }
+    virtual LiveMaterial* _newLiveMaterial(int id);
+    
+
+protected:
+    virtual bool supportsBackgroundCompiles();
 
 private:
 	void CreateResources();
@@ -46,11 +122,368 @@ private:
 };
 
 
+bool LiveMaterial_GL::NeedsRender() {
+	lock_guard<mutex> guard(compileOutputMutex);
+	for (size_t i = 0; i < compileOutput.size(); ++i)
+		if (compileOutput[i].success)
+			return true;
+	return false;
+}
+
+
+
+void LiveMaterial_GL::Draw(int uniformIndex) {
+    assert(glGetError() == GL_NO_ERROR); // Make sure no OpenGL error happen before starting rendering
+    
+    compileNewShaders();
+    if (_program == 0)
+        return;
+
+    glUseProgram(_program);
+    updateUniforms(uniformIndex);
+    printOpenGLError();
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    printOpenGLError();
+}
+
+void LiveMaterial_GL::_SetTexture(const char* name, void* nativeTexturePtr) {
+    if (_program == 0)
+        return;
+
+    lock_guard<mutex> guard(texturesMutex);
+    auto iter = textureUnits.find(name);
+    if (iter == textureUnits.end())
+        return;
+    
+    auto textureID = (GLint)(size_t)nativeTexturePtr;
+    auto textureUnit = iter->second;
+    textureIDs[textureUnit] = textureID;           
+}
+
+void LiveMaterial_GL::_QueueCompileTasks(vector<CompileTask> tasks) {
+    lock_guard<mutex> guard(compileTaskMutex);
+    for (size_t i = 0; i < tasks.size(); ++i)
+        compileTasks.push_back(tasks[i]);
+}
+
+void LiveMaterial_GL::LinkProgram() {
+    GLuint program = glCreateProgram();
+    assert(program > 0);
+    //glBindAttribLocation(program, ATTRIB_POSITION, "xlat_attrib_POSITION");
+    //glBindAttribLocation(program, ATTRIB_COLOR, "xlat_attrib_COLOR");
+    //glBindAttribLocation(program, ATTRIB_UV, "xlat_attrib_TEXCOORD0");
+    glAttachShader(program, _vertexShader);
+    glAttachShader(program, _fragmentShader);
+#if SUPPORT_OPENGL_CORE
+    if (((RenderAPI_OpenGLCoreES*)_renderAPI)->IsOpenGLCore())
+        glBindFragDataLocationEXT(program, 0, "fragColor");
+#endif
+    glLinkProgram(program);
+    
+    GLint status = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    
+    if (status == GL_TRUE) {
+        if (_program)
+            glDeleteProgram(_program);
+        _program = program;
+        //stats.compileState = CompileState::Success;
+    } else {
+        Debug("failure linking program:");
+        //stats.compileState = CompileState::Error;
+        
+        GLint infoLen = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLen);
+        if (infoLen > 0) {
+            char* infoLog = (char*)malloc (sizeof(char) * infoLen);
+            glGetProgramInfoLog(program, infoLen, nullptr, infoLog);
+            Debug(infoLog);
+            free(infoLog);
+        }
+    }
+}
+
+static void writeTextToFile(const char* filename, const char* text) {
+    std::ofstream debugOut;
+    debugOut.open(filename);
+    debugOut << text;
+    debugOut.close();
+}
+
+
+
+GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
+{
+    GLuint shader = glCreateShader(type);
+    if (shader == 0) {
+        Debug("could not create shader object");
+        return 0;
+    }
+    
+    if (debugOutPath)
+        writeTextToFile(debugOutPath, shaderSrc);
+    
+    //if (verbose)
+    //DebugSS("GLSL Version " << (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
+    
+    
+    //if (type == GL_FRAGMENT_SHADER)
+        //stats.compileState = CompileState::Compiling;
+    glShaderSource(shader, 1, &shaderSrc, NULL);
+    glCompileShader(shader);
+    
+    GLint compiled;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        GLint infoLen = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
+        Debug("error compiling glsl shader:");
+        //if (type == GL_FRAGMENT_SHADER)
+            //stats.compileState = CompileState::Error;
+        if (infoLen > 1) {
+            char* infoLog = (char*)malloc (sizeof(char) * infoLen);
+            if (infoLog) {
+                glGetShaderInfoLog(shader, infoLen, NULL, infoLog);
+                Debug(infoLog);
+                free(infoLog);
+            }
+        }
+        
+        glDeleteShader(shader);
+        return 0;
+    }
+    
+    return shader;
+}
+
+
+void LiveMaterial_GL::compileNewShaders() {
+    bool needsUpdate = false;
+    vector<CompileTask> tasks;
+    {
+        lock_guard<mutex> guard(compileTaskMutex);
+        tasks = compileTasks;
+        compileTasks.clear();
+    }
+    
+    bool error = false;
+
+    for (size_t i = 0; i < tasks.size(); ++i) {
+        auto compileTask = tasks[i];
+        GLenum glType;
+        GLuint* storedProgram;
+        switch (compileTask.shaderType) {
+            case Fragment:
+                glType = GL_FRAGMENT_SHADER;
+                storedProgram = &_fragmentShader;
+                break;
+            case Vertex:
+                glType = GL_VERTEX_SHADER;
+                storedProgram = &_vertexShader;
+                break;
+            default:
+                assert(false);
+                continue;
+        }
+        GLuint newShader = loadShader(glType, compileTask.src.c_str(), nullptr);
+        if (newShader) {
+            if (*storedProgram)
+                glDeleteShader(*storedProgram);
+            *storedProgram = newShader;
+            needsUpdate = true;
+        } else {
+            error = true;
+        }
+    }
+
+    if (needsUpdate) {
+        LinkProgram();
+        if (_program) {
+            _discoverUniforms(_program);
+        }
+    }
+    
+    _stats.compileState = error ? CompileState::Error : CompileState::Success;
+    
+    printOpenGLError();
+}
+
+void LiveMaterial_GL::_discoverUniforms(GLuint program) {
+    lock_guard<mutex> uniformsGuard(uniformsMutex);
+    lock_guard<mutex> texturesGuard(texturesMutex);
+        int maxNameLength = 0;
+        glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxNameLength);
+        if (maxNameLength == 0) {
+            Debug("max name length was 0");
+            return;
+        }
+        
+        char* name = new char[maxNameLength + 1];
+        
+        int numUniforms = 0;
+        glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &numUniforms);
+        int offset = 0;
+        if (!printOpenGLError()) {
+            int textureUnit = 0;
+            textureUnits.clear();
+            uniformLocs.clear();
+            
+            for (int i = 0; i < numUniforms; i++) {
+                int nameLength = 0;
+                int arraysize = 0;
+                GLenum type;
+                glGetActiveUniform(program, i, maxNameLength, &nameLength, &arraysize, &type, name);
+                if (arraysize > 1) {
+                    string namestr(name);
+                    size_t s = namestr.size();
+                    if (s > 3 && namestr[s-1] == ']' && namestr[s-2] == '0' && namestr[s-3] == '[') {
+                        namestr.resize(s - 3);
+                        strncpy(name, namestr.c_str(), s - 3);
+                    }
+                }
+                assert(arraysize > 0);
+                int size = 0;
+                PropType propType;
+                
+                switch (type) {
+                    case GL_FLOAT:
+                        size = 1 * sizeof(float) * arraysize;
+                        propType = Float;
+                        break;
+                    case GL_FLOAT_VEC2:
+                        size = 2 * sizeof(float) * arraysize;
+                        propType = Vector2;
+                        break;
+                    case GL_FLOAT_VEC3:
+                        size = 3 * sizeof(float) * arraysize;
+                        propType = Vector3;
+                        break;
+                    case GL_FLOAT_VEC4:
+                        size = 4 * sizeof(float) * arraysize;
+                        propType = Vector4;
+                        break;
+                    case GL_FLOAT_MAT4:
+                        size = 16 * sizeof(float) * arraysize;
+                        propType = Matrix;
+                        break;
+                    case GL_SAMPLER_2D: {
+                        // assign texture units in the order we see them here
+                        textureUnits[name] = textureUnit++;
+                        uniformLocs.push_back(glGetUniformLocation(program, name));
+                        continue; // don't make a prop
+                    }
+                    default:
+                        const char* typeName = nullptr; //getGLTypeName(type);
+                        if (typeName == nullptr) typeName = "unknown";
+                        DebugSS("unknown gl type " << typeName);
+                        assert(false);
+                        continue;
+                }
+                
+                //DebugSS("uniform " << name << " with size " << size << " at offset " << offset);
+                auto prop = propForName(name, propType);
+                prop->arraySize = arraysize;
+                prop->size = size;
+                prop->offset = offset;
+                prop->uniformIndex = glGetUniformLocation(program, name);
+                
+                printOpenGLError();
+                offset += size;
+            }
+            
+            textureIDs.clear();
+            for (int i = 0; i < textureUnit; ++i)
+                textureIDs.push_back(0);
+        }
+        
+        delete [] name;
+        ensureConstantBufferSize(offset);
+    
+
+}
+
+void LiveMaterial_GL::updateUniforms(int uniformIndex) {
+
+    // Bind textures
+    {
+        lock_guard<mutex> guard(texturesMutex);
+        for (size_t textureUnit = 0; textureUnit < textureIDs.size(); ++textureUnit) {
+            auto uniformLoc = uniformLocs[textureUnit];
+            auto textureID = textureIDs[textureUnit];
+            if (textureID < 1)
+                continue;
+
+            GLenum activeTexture = GL_TEXTURE0 + (GLenum)textureUnit;
+            glActiveTexture(activeTexture);
+            printOpenGLError();
+            glBindTexture(GL_TEXTURE_2D, textureID);
+            if (printOpenGLError()) { DebugSS("Error binding texture with id " << textureID); }
+            glUniform1i(uniformLoc, (GLint)textureUnit);
+            printOpenGLError();
+
+            int w = 0, h = 0;
+            int miplevel = 0;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_WIDTH, &w);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, miplevel, GL_TEXTURE_HEIGHT, &h);
+            printOpenGLError();
+        }
+    }
+
+    // Set uniforms
+    {
+        lock_guard<mutex> guard(uniformsMutex);
+        for (auto i = shaderProps.begin(); i != shaderProps.end(); i++) {
+            auto prop = i->second;
+            
+            if (prop->uniformIndex == ShaderProp::UNIFORM_UNSET || prop->uniformIndex == prop->UNIFORM_INVALID) {
+                //errors << "invalid shader variable " << prop->name << "\n";
+                continue;
+            }
+
+            auto data = (float*)(_constantBuffer + prop->offset);
+
+            switch (prop->type) {
+            case Float:
+                glUniform1fv(prop->uniformIndex, prop->arraySize, data);
+                break;
+            case Vector2:
+                glUniform2fv(prop->uniformIndex, prop->arraySize, data);
+                break;
+            case Vector3:
+                glUniform3fv(prop->uniformIndex, prop->arraySize, data);
+                break;
+            case Vector4:
+                glUniform4fv(prop->uniformIndex, prop->arraySize, data);
+                break;
+            case Matrix: {
+                const int numElements = prop->arraySize;
+                const bool transpose = GL_FALSE;
+                glUniformMatrix4fv(prop->uniformIndex, numElements, transpose, data);
+                break;
+            }
+            default:
+                assert(false);
+            }
+
+            //string errorStr(errors.str());
+            //if (errorStr.size()) Debug(errorStr.c_str());
+                    
+            if (printOpenGLError())
+                DebugSS("error setting uniform " << prop->name << " with type " << prop->typeString() << " and uniform index " << prop->uniformIndex);
+        }
+    }
+}
+
+
 RenderAPI* CreateRenderAPI_OpenGLCoreES(UnityGfxRenderer apiType)
 {
 	return new RenderAPI_OpenGLCoreES(apiType);
 }
 
+bool RenderAPI_OpenGLCoreES::supportsBackgroundCompiles() {
+    return false;
+}
 
 enum VertexInputs
 {
@@ -108,7 +541,7 @@ static const char* kGlesFShaderTextGLCore = FRAGMENT_SHADER_SRC("#version 150\n"
 static GLuint CreateShader(GLenum type, const char* sourceText)
 {
 	GLuint ret = glCreateShader(type);
-	glShaderSource(ret, 1, &sourceText, NULL);
+	glShaderSource(ret, 1, &sourceText, nullptr);
 	glCompileShader(ret);
 	return ret;
 }
@@ -162,7 +595,7 @@ void RenderAPI_OpenGLCoreES::CreateResources()
 	// Create vertex buffer
 	glGenBuffers(1, &m_VertexBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, m_VertexBuffer);
-	glBufferData(GL_ARRAY_BUFFER, 1024, NULL, GL_STREAM_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, 1024, nullptr, GL_STREAM_DRAW);
 
 	assert(glGetError() == GL_NO_ERROR);
 }
@@ -261,6 +694,8 @@ void RenderAPI_OpenGLCoreES::EndModifyTexture(void* textureHandle, int textureWi
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, GL_RGBA, GL_UNSIGNED_BYTE, dataPtr);
 	delete[](unsigned char*)dataPtr;
 }
+
+LiveMaterial* RenderAPI_OpenGLCoreES::_newLiveMaterial(int id) { return new LiveMaterial_GL(this, id); }
 
 
 #endif // #if SUPPORT_OPENGL_UNIFIED

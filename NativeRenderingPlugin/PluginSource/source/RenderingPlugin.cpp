@@ -138,7 +138,7 @@ extern "C" {
 
 	NativePtr UNITY_FUNC GetLiveMaterialPtr(int id) { return s_CurrentAPI ? s_CurrentAPI->GetLiveMaterialById(id) : nullptr; }
 	void UNITY_FUNC DestroyLiveMaterial(int id) { if (s_CurrentAPI) s_CurrentAPI->DestroyLiveMaterial(id); }
-	Stats UNITY_FUNC GetStats(LiveMaterial* liveMaterial) { return liveMaterial ? liveMaterial->GetStats() : Stats{}; }
+    Stats UNITY_FUNC GetStats(LiveMaterial* liveMaterial) { return liveMaterial->GetStats(); }
 	void UNITY_FUNC SetStats(LiveMaterial* liveMaterial, Stats stats) { return liveMaterial->SetStats(stats); }
 	bool UNITY_FUNC HasProperty(LiveMaterial* liveMaterial, const char* name) { return liveMaterial->HasProperty(name); }
 	bool UNITY_FUNC NeedsRender(LiveMaterial* liveMaterial) { return liveMaterial->NeedsRender(); }
