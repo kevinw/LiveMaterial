@@ -189,6 +189,13 @@ public:
 	LiveMaterial* CreateLiveMaterial();
 	bool DestroyLiveMaterial(int id);
 
+	enum Flags {
+		ShowWarnings = 1
+	};
+
+	bool showWarnings() const { return flags & ShowWarnings; }
+	void SetFlags(int flags);
+
 	LiveMaterial* GetLiveMaterialById(int id);
 	LiveMaterial* GetLiveMaterialByIdLocked(int id);
 
@@ -196,6 +203,7 @@ public:
 	mutex materialsMutex;
 
 protected:
+	int flags = 0;
     virtual bool supportsBackgroundCompiles();
 	virtual bool compileShader(CompileTask compileTask);
 

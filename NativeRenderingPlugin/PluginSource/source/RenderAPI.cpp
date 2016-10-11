@@ -443,6 +443,8 @@ void RenderAPI::QueueCompileTasks(vector<CompileTask> tasks)
 		compileQueue.push(tasks[i]);
 }
 
+void RenderAPI::SetFlags(int flags) { this->flags = flags; }
+
 RenderAPI* CreateRenderAPI(UnityGfxRenderer apiType)
 {
 #	if SUPPORT_D3D11

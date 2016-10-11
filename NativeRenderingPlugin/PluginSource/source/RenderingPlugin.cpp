@@ -165,6 +165,10 @@ extern "C" {
 		if (s_CurrentAPI)
 			s_CurrentAPI->GetDebugInfo(numCompileTasks, numLiveMaterials);
 	}
+	void UNITY_FUNC SetFlags(int flags) {
+		if (s_CurrentAPI)
+			s_CurrentAPI->SetFlags(flags);
+	}
 }
 
 mutex renderAPIMutex;

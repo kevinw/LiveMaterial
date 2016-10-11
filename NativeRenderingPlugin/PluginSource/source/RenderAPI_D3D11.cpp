@@ -2,6 +2,7 @@
 
 #include "RenderAPI.h"
 #include "PlatformBase.h"
+#include "lrucache.hpp"
 
 // Direct3D 11 implementation of RenderAPI.
 
@@ -163,7 +164,6 @@ bool LiveMaterial_D3D11::NeedsRender() {
 }
 
 void LiveMaterial_D3D11::SetDepthWritesEnabled(bool enabled) {
-
 }
 
 void LiveMaterial_D3D11::_SetTexture(const char* name, void* nativeTexturePtr) {
@@ -413,14 +413,14 @@ static const char* profileNameForShaderType(ShaderType shaderType) {
 	}
 }
 
-static map<size_t, string> cachedShaderBlobs;
+static cache::lru_cache<size_t, string> cachedShaderBlobs(20);
 
 static bool getCachedOutput(const CompileTask& task, CompileOutput& output) {
 	auto hashValue = task.hash();
 	auto iter = cachedShaderBlobs.find(hashValue);
 	if (iter != cachedShaderBlobs.end()) {
 		output.success = true;
-		output.shaderBlob = iter->second;
+		output.shaderBlob = iter->second->second;
 		return true;
 	}
 	return false;
@@ -429,7 +429,7 @@ static bool getCachedOutput(const CompileTask& task, CompileOutput& output) {
 static void cacheOutput(const CompileTask& task, const CompileOutput& output) {
 	assert(!output.shaderBlob.empty());
 	auto hashValue = task.hash();
-	cachedShaderBlobs[hashValue] = output.shaderBlob;
+	cachedShaderBlobs.put(hashValue, output.shaderBlob);
 }
 
 bool RenderAPI_D3D11::compileShader(CompileTask task)
@@ -465,20 +465,23 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 			ID3DBlob* errorBlob = nullptr;
 
 			HRESULT hr = D3DCompile(
-				task.src.c_str(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+				task.src.data(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
 				task.entryPoint.c_str(), profile, flags, 0, &shaderBlob, &errorBlob);
 
+			string errstr;
+			if (errorBlob)
+				errstr = string((const char*)errorBlob->GetBufferPointer(), errorBlob->GetBufferSize());
+
+			//const char* inputFilename = "c:\\Users\\kevin\\Desktop\\input.hlsl";
+			//writeTextToFile(inputFilename, task.src.c_str());
+
 			if (FAILED(hr)) {
-				std::string errstr;
-				if (errorBlob) {
-					errstr = string((const char*)errorBlob->GetBufferPointer(), errorBlob->GetBufferSize());
-				}
 				DebugSS("Could not compile shader: " << errstr);
-				const char* inputFilename = "c:\\Users\\kevin\\Desktop\\input.hlsl";
-				writeTextToFile(inputFilename, task.src.c_str());
-				DebugSS("file is at " << inputFilename);
+				//DebugSS("file is at " << inputFilename);
 			}
 			else {
+				if (!errstr.empty() && showWarnings())
+					DebugSS(errstr);
 				output.shaderBlob = string((const char*)shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize());
 				output.success = true;
 				cacheOutput(task, output);
