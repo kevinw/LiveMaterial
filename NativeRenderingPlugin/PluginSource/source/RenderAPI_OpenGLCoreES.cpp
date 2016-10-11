@@ -204,15 +204,6 @@ void LiveMaterial_GL::LinkProgram() {
     }
 }
 
-static void writeTextToFile(const char* filename, const char* text) {
-    std::ofstream debugOut;
-    debugOut.open(filename);
-    debugOut << text;
-    debugOut.close();
-}
-
-
-
 GLuint loadShader(GLenum type, const char *shaderSrc, const char* debugOutPath)
 {
     GLuint shader = glCreateShader(type);

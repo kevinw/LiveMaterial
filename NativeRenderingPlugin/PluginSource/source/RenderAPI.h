@@ -3,6 +3,7 @@
 #include "Unity/IUnityGraphics.h"
 #include <map>
 #include <string>
+#include <fstream>
 #include <sstream>
 #include <vector>
 #include <mutex>
@@ -52,11 +53,20 @@ const char* shaderTypeName(ShaderType shaderType);
 #define SAFE_DELETE(a) if (a) { delete a; a = nullptr; }
 #endif
 
+void writeTextToFile(const char* filename, const char* text);
+
+
 struct CompileTask {
 	ShaderType shaderType;
 	string src;
 	string filename;
 	string entryPoint;
+	size_t hash() const {
+		auto h1 = std::hash<string>{}(src);
+		auto h2 = std::hash<string>{}(filename);
+		auto h3 = std::hash<string>{}(entryPoint);
+		return h1 ^ (h2 << 1) ^ (h3 << 2);
+	}
 	int liveMaterialId;
 	int id;
 	bool quitting;

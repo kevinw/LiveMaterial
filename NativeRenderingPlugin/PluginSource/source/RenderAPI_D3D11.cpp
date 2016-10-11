@@ -34,7 +34,7 @@ static bool DX_CHECK(HRESULT hr) {
 
 struct CompileOutput {
 	ShaderType shaderType;
-	ID3DBlob *shaderBlob;
+	string shaderBlob;
 	int inputId;
 	bool success;
 };
@@ -74,8 +74,6 @@ public:
 
 		{ // Cleanup compile outputs
 			lock_guard<mutex> guard(compileOutputMutex);
-			for (size_t i = 0; i < compileOutput.size(); ++i)
-				SAFE_RELEASE(compileOutput[i].shaderBlob);
 			compileOutput.clear();
 		}
 	}
@@ -89,7 +87,7 @@ public:
 	virtual bool NeedsRender();
 
 	void updateD3D11Shader(CompileOutput output);
-	void constantBufferReflect(ID3DBlob* shaderBlob);
+	void constantBufferReflect(const string& shaderBlob);
 
 protected:
 	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
@@ -133,12 +131,12 @@ protected:
 	vector<CompileOutput> compileOutput;
 };
 
-static ID3D11ShaderReflection* shaderReflector(ID3DBlob* shader) {
+static ID3D11ShaderReflection* shaderReflector(const string& shader) {
 	ID3D11ShaderReflection* reflector = nullptr;
 
 	HRESULT hr = D3DReflect(
-		shader->GetBufferPointer(),
-		shader->GetBufferSize(),
+		shader.data(),
+		shader.size(),
 		IID_ID3D11ShaderReflection,
 		(void**)&reflector);
 
@@ -189,7 +187,7 @@ void LiveMaterial_D3D11::QueueCompileOutput(CompileOutput& output) {
 	compileOutput.push_back(output);
 }
 
-void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
+void LiveMaterial_D3D11::constantBufferReflect(const string& shaderBlob) {
 	auto pReflector = shaderReflector(shaderBlob);
 	if (!pReflector)
 		return;
@@ -308,18 +306,18 @@ void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 {
 	if (!output.success) {
 		_stats.compileState = CompileState::Error;
-		assert(!output.shaderBlob);
+		assert(output.shaderBlob.empty());
 		return;
 	}
 
 	_stats.compileState = CompileState::Success;
 
-	assert(output.shaderBlob);
+	assert(!output.shaderBlob.empty());
 	if (output.shaderType == Fragment || output.shaderType == Compute)
 		constantBufferReflect(output.shaderBlob);
 
-	auto buf = output.shaderBlob->GetBufferPointer();
-	auto bufSize = output.shaderBlob->GetBufferSize();
+	auto buf = output.shaderBlob.data();
+	auto bufSize = output.shaderBlob.size();
 	assert(buf && bufSize > 0);
 
 	switch (output.shaderType) {
@@ -362,8 +360,6 @@ void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 	default:
 		assert(false);
 	}
-
-	SAFE_RELEASE(output.shaderBlob);
 }
 
 
@@ -417,58 +413,78 @@ static const char* profileNameForShaderType(ShaderType shaderType) {
 	}
 }
 
+static map<size_t, string> cachedShaderBlobs;
+
+static bool getCachedOutput(const CompileTask& task, CompileOutput& output) {
+	auto hashValue = task.hash();
+	auto iter = cachedShaderBlobs.find(hashValue);
+	if (iter != cachedShaderBlobs.end()) {
+		output.success = true;
+		output.shaderBlob = iter->second;
+		return true;
+	}
+	return false;
+}
+
+static void cacheOutput(const CompileTask& task, const CompileOutput& output) {
+	assert(!output.shaderBlob.empty());
+	auto hashValue = task.hash();
+	cachedShaderBlobs[hashValue] = output.shaderBlob;
+}
+
 bool RenderAPI_D3D11::compileShader(CompileTask task)
 {
-	const D3D_SHADER_MACRO defines[] = {
-		"LIVE_MATERIAL", "1",
-		NULL, NULL
-	};
-
-	ID3DBlob *shaderBlob = nullptr;
-	ID3DBlob* errorBlob = nullptr;
-
-	UINT flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
-
-	/*if (optimizationLevel == 0) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL0;
-	if (optimizationLevel == 1) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL1;
-	if (optimizationLevel == 2) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL2;
-	if (optimizationLevel == 3) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
-	else DebugSS("Unknown optimization level " << optimizationLevel);
-	*/
-	flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
-
-	//if (shaderDebugging) {
-		//flags |= D3DCOMPILE_DEBUG;
-	//}
-
 	CompileOutput output;
 	output.shaderType = task.shaderType;
 	output.inputId = task.id;
-	output.shaderBlob = nullptr;
+	output.shaderBlob = "";
 	output.success = false;
 
-	auto profile = profileNameForShaderType(task.shaderType);
-	if (!profile) {
-		Debug("no profile found for shader type");
-	} else if (task.src.empty() || task.filename.empty() || task.entryPoint.empty()) {
-		Debug("empty src or srcName or entryPoint");
-	}
-	else {
-		HRESULT hr = D3DCompile(
-			task.src.c_str(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
-			task.entryPoint.c_str(), profile, flags, 0, &shaderBlob, &errorBlob);
+	if (!getCachedOutput(task, output)) {
+		const D3D_SHADER_MACRO defines[] = { NULL, NULL };
+		UINT flags = D3DCOMPILE_ENABLE_BACKWARDS_COMPATIBILITY;
+		/*if (optimizationLevel == 0) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL0;
+		if (optimizationLevel == 1) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL1;
+		if (optimizationLevel == 2) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL2;
+		if (optimizationLevel == 3) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+		else DebugSS("Unknown optimization level " << optimizationLevel);
+		*/
+		flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+		//if (shaderDebugging) {
+			//flags |= D3DCOMPILE_DEBUG;
+		//}
+		auto profile = profileNameForShaderType(task.shaderType);
+		if (!profile) {
+			Debug("no profile found for shader type");
+		}
+		else if (task.src.empty() || task.filename.empty() || task.entryPoint.empty()) {
+			Debug("empty src or srcName or entryPoint");
+		}
+		else {
+			ID3DBlob *shaderBlob = nullptr;
+			ID3DBlob* errorBlob = nullptr;
 
-		if (FAILED(hr)) {
-			std::string errstr;
-			if (errorBlob) {
-				errstr = std::string((char*)errorBlob->GetBufferPointer(), errorBlob->GetBufferSize());
-				SAFE_RELEASE(errorBlob);
+			HRESULT hr = D3DCompile(
+				task.src.c_str(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+				task.entryPoint.c_str(), profile, flags, 0, &shaderBlob, &errorBlob);
+
+			if (FAILED(hr)) {
+				std::string errstr;
+				if (errorBlob) {
+					errstr = string((const char*)errorBlob->GetBufferPointer(), errorBlob->GetBufferSize());
+				}
+				DebugSS("Could not compile shader: " << errstr);
+				const char* inputFilename = "c:\\Users\\kevin\\Desktop\\input.hlsl";
+				writeTextToFile(inputFilename, task.src.c_str());
+				DebugSS("file is at " << inputFilename);
 			}
-			DebugSS("Could not compile shader:\n " << errstr);
+			else {
+				output.shaderBlob = string((const char*)shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize());
+				output.success = true;
+				cacheOutput(task, output);
+			}
 			SAFE_RELEASE(shaderBlob);
-		} else {
-			output.shaderBlob = shaderBlob;
-			output.success = true;
+			SAFE_RELEASE(errorBlob);
 		}
 	}
 

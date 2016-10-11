@@ -5,6 +5,15 @@
 #include <assert.h>
 #include <math.h>
 
+void writeTextToFile(const char* filename, const char* text) {
+    std::ofstream debugOut;
+    debugOut.open(filename);
+    debugOut << text;
+    debugOut.close();
+}
+
+
+
 const char* shaderTypeName(ShaderType shaderType) {
 	switch (shaderType) {
 	case Vertex: return "Vertex";
