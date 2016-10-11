@@ -95,6 +95,7 @@ public:
 	void SetVector4(const char* name, float* value);
 	void SetMatrix(const char* name, float* value);
 	void SetVectorArray(const char* name, float* values, int numVector4s);
+	void SetMatrixArray(const char* name, float* values, int numMatrices);
 	void SetFloatArray(const char* name, float* value, int numElems);
 	bool SetTextureID(const char* name, int id);
 	void SetTexturePtr(const char* name, int id, void* nativeTexturePointer);
@@ -106,10 +107,7 @@ public:
 	void getproparray(const char* name, PropType type, float* value, int numFloats);
 	void getproparray_locked(const char* name, PropType type, float* value, int numFloats);
 	virtual void Draw(int uniformIndex);
-
 	virtual bool NeedsRender();
-
-
 	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
 	void SetComputeSource(const char* source, const char* entryPoint);
 
@@ -122,8 +120,8 @@ protected:
 
 	Stats _stats = {};
 
-	RenderAPI* _renderAPI;
-	int _id;
+	RenderAPI* _renderAPI = nullptr;
+	int _id = -1;
 
 	void ensureConstantBufferSize(size_t size, PropMap* oldProps = nullptr, PropMap* newProps = nullptr);
 	unsigned char* _constantBuffer = nullptr;

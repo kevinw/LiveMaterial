@@ -339,7 +339,11 @@ void LiveMaterial_GL::_discoverUniforms(GLuint program) {
                     size_t s = namestr.size();
                     if (s > 3 && namestr[s-1] == ']' && namestr[s-2] == '0' && namestr[s-3] == '[') {
                         namestr.resize(s - 3);
+#ifdef WIN32
+                        strncpy_s(name, maxNameLength, namestr.c_str(), s - 3);
+#else
                         strncpy(name, namestr.c_str(), s - 3);
+#endif
                     }
                 }
                 assert(arraysize > 0);

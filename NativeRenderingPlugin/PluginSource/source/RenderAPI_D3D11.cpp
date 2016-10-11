@@ -273,7 +273,7 @@ void LiveMaterial_D3D11::constantBufferReflect(ID3DBlob* shaderBlob) {
 
 				int totalSize = prop->arraySize * prop->size;
 				if (arraySize > 1) {
-					DebugSS("prop " << prop->name << " has size " << prop->size << " and array size of " << prop->arraySize << " for a total of " << totalSize);
+					//DebugSS("prop " << prop->name << " has size " << prop->size << " and array size of " << prop->arraySize << " for a total of " << totalSize);
 				}
 				_deviceConstantBufferSize = max(_deviceConstantBufferSize, var_desc.StartOffset + totalSize);
 			}

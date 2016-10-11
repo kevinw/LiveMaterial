@@ -152,6 +152,7 @@ extern "C" {
 	void UNITY_FUNC SetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetMatrix(name, value); }
 	void UNITY_FUNC SetFloatArray(LiveMaterial* liveMaterial, const char* name, float* value, int numFloats) { liveMaterial->SetFloatArray(name, value, numFloats); }
 	void UNITY_FUNC SetVectorArray(LiveMaterial* liveMaterial, const char* name, float* values, int numVector4s) { liveMaterial->SetVectorArray(name, values, numVector4s); }
+	void UNITY_FUNC SetMatrixArray(LiveMaterial* liveMaterial, const char* name, float* values, int numMatrices) { liveMaterial->SetMatrixArray(name, values, numMatrices); }
 	void UNITY_FUNC GetVector4(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->GetVector4(name, value); }
 	void UNITY_FUNC GetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->GetMatrix(name, value); }
 	float UNITY_FUNC GetFloat(LiveMaterial* liveMaterial, const char* name) {

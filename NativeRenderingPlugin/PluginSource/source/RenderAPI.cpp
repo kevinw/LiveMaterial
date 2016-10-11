@@ -24,8 +24,19 @@ void LiveMaterial::SubmitUniforms(int uniformIndex) {
 	lock_guard<mutex> uniformsGuard(uniformsMutex);
 	lock_guard<mutex> gpuGuard(gpuMutex);
 	assert(uniformIndex < MAX_GPU_BUFFERS);
-	if (_gpuBuffer && _constantBuffer)
-		memcpy(_gpuBuffer + _constantBufferSize * uniformIndex, _constantBuffer, _constantBufferSize);
+	if (_gpuBuffer && _constantBuffer) {
+		unsigned char* dest = _gpuBuffer + _constantBufferSize * uniformIndex;
+#if false
+		for (auto iter = shaderProps.begin(); iter != shaderProps.end(); ++iter) {
+			auto name = iter->first;
+			auto prop = iter->second;
+			if (0 != memcmp(dest + prop->offset, _constantBuffer + prop->offset, prop->arraySize * prop->size))
+				DebugSS("Changed prop " << name);
+
+		}
+#endif
+		memcpy(dest, _constantBuffer, _constantBufferSize);
+	}
 }
 
 void LiveMaterial::setproparray(const char* name, PropType type, float* value, int numElems) {
@@ -37,6 +48,9 @@ void LiveMaterial::setproparray(const char* name, PropType type, float* value, i
     if (!prop) return;
     
 	size_t bytesToCopy = prop->size * (int)fmin(numElems, prop->arraySize);
+	if (numElems > 1) {
+		//DebugSS("setproparray(" << name << ", " << propTypeStrings[type] << ", " << value << ", " << numElems << ") is copying " << bytesToCopy << " bytes.");
+	}
 	memcpy(_constantBuffer + prop->offset, value, bytesToCopy);
 }
 
@@ -72,6 +86,10 @@ void LiveMaterial::SetFloatArray(const char * name, float * value, int numFloats
 
 void LiveMaterial::SetVectorArray(const char* name, float* values, int numVector4s) {
 	setproparray(name, PropType::Vector4, values, numVector4s);
+}
+
+void LiveMaterial::SetMatrixArray(const char* name, float* values, int numMatrices) {
+	setproparray(name, PropType::Matrix, values, numMatrices);
 }
 
 bool LiveMaterial::SetTextureID(const char * name, int id)
