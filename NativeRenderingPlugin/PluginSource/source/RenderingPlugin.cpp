@@ -169,6 +169,10 @@ extern "C" {
 		if (s_CurrentAPI)
 			s_CurrentAPI->SetFlags(flags);
 	}
+	void UNITY_FUNC DumpUniformsToFile(LiveMaterial* liveMaterial, const char* filename) {
+		assert(GetLiveMaterialPtr(liveMaterial->id()));
+		liveMaterial->DumpUniformsToFile(filename, true);
+	}
 }
 
 mutex renderAPIMutex;

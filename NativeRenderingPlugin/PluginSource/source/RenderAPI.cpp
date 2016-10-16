@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <math.h>
 
+using std::endl;
+
 void writeTextToFile(const char* filename, const char* text) {
     std::ofstream debugOut;
     debugOut.open(filename);
@@ -152,6 +154,57 @@ void LiveMaterial::SetDepthWritesEnabled(bool enabled) {
 bool LiveMaterial::HasProperty(const char* name) {
 	lock_guard<mutex> guard(uniformsMutex);
 	return _lookupPropByName(shaderProps, name) != nullptr;
+}
+
+void LiveMaterial::DumpUniformsToFile(const char* filename, bool flatten) {
+	lock_guard<mutex> guard(uniformsMutex);
+    std::ofstream js(filename);
+    js << "{" << endl;
+    for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
+        auto prop = i->second;
+		js << "    \"" << prop->name << "\": ";
+
+		float numFloats = (float)prop->size / (float)sizeof(float);
+		assert(abs(numFloats - (int)numFloats) < 0.001); // for now assume all things are floats
+
+		if (flatten) {
+			if (prop->arraySize > 1 || numFloats > 1)
+				js << "[";
+
+			bool first = true;
+			for (int a = 0; a < prop->arraySize; ++a) {
+				for (int f = 0; f < (int)numFloats; ++f) {
+					if (first) first = false;
+					else js << ", ";
+					js << *(float*)(_constantBuffer + prop->offset + f * sizeof(float) + a * prop->size);
+				}
+			}
+			if (prop->arraySize > 1 || numFloats > 1)
+				js << "]";
+		} else {
+			for (int a = 0; a < prop->arraySize; ++a) {
+				if (a == 0 && prop->arraySize >= 2) js << "[";
+
+				for (int f = 0; f < (int)numFloats; ++f) {
+					if (f == 0 && numFloats > 1) js << "[";
+					js << *(float*)(_constantBuffer + prop->offset + f * sizeof(float) + a * prop->size);
+					if (f != numFloats - 1) js << ", ";
+					if (f == ((int)numFloats) - 1 && numFloats > 1) js << "]";
+				}
+
+				if (prop->arraySize >= 2) js << (a < prop->arraySize - 1) ? ", " : "]";
+			}
+		}
+
+        auto nexti = i;
+        nexti++;
+        if (nexti != shaderProps.end())
+          js << ", ";
+
+        js << "\n";
+    }
+
+    js << "}" << endl;
 }
 
 ShaderProp * LiveMaterial::propForNameSizeOffset(const char * name, uint16_t size, uint16_t offset) {

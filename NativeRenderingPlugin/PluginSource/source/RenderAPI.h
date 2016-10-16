@@ -121,6 +121,8 @@ public:
 	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
 	void SetComputeSource(const char* source, const char* entryPoint);
 
+	void DumpUniformsToFile(const char* filename, bool flatten);
+
 protected:
     virtual void _QueueCompileTasks(vector<CompileTask> tasks);
 
