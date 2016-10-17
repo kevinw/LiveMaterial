@@ -18,4 +18,10 @@ UnityProject/Temp
 UnityProject/UWP
 
 NativeRenderingPlugin/PluginSource/build
-NativeRenderingPlugin/PluginSource/projects/VisualStudio2015/RenderingPlugin.VC.db
+RenderingPlugin/VisualStudio2015/Win32/
+RenderingPlugin/VisualStudio2015/x64/
+RenderingPlugin/RenderingPluginTest/x64/
+UnityProject/Assets/Plugins/x86_64/LiveMaterial.dll
+*.ipch
+*.VC.db
+*.TMP
