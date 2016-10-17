@@ -162,6 +162,10 @@ void LiveMaterial::DumpUniformsToFile(const char* filename, bool flatten) {
     js << "{" << endl;
     for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
         auto prop = i->second;
+
+		if (prop->size == 0)
+			continue;
+
 		js << "    \"" << prop->name << "\": ";
 
 		float numFloats = (float)prop->size / (float)sizeof(float);
