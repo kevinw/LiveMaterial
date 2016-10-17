@@ -3,6 +3,7 @@
 #include "Unity/IUnityGraphics.h"
 #include <map>
 #include <string>
+#include <fstream>
 #include <sstream>
 #include <vector>
 #include <mutex>
@@ -52,11 +53,20 @@ const char* shaderTypeName(ShaderType shaderType);
 #define SAFE_DELETE(a) if (a) { delete a; a = nullptr; }
 #endif
 
+void writeTextToFile(const char* filename, const char* text);
+
+
 struct CompileTask {
 	ShaderType shaderType;
 	string src;
 	string filename;
 	string entryPoint;
+	size_t hash() const {
+		auto h1 = std::hash<string>{}(src);
+		auto h2 = std::hash<string>{}(filename);
+		auto h3 = std::hash<string>{}(entryPoint);
+		return h1 ^ (h2 << 1) ^ (h3 << 2);
+	}
 	int liveMaterialId;
 	int id;
 	bool quitting;
@@ -77,6 +87,9 @@ struct Stats {
     unsigned int instructionCount;
 };
 
+extern mutex renderAPIMutex;
+RenderAPI* GetCurrentRenderAPI();
+
 class LiveMaterial {
 public:
 	LiveMaterial(RenderAPI* renderAPI, int id);
@@ -91,7 +104,9 @@ public:
 	void SetFloat(const char* name, float value);
 	void SetVector4(const char* name, float* value);
 	void SetMatrix(const char* name, float* value);
-	void SetFloatArray(const char* name, float* value, int numFloats);
+	void SetVectorArray(const char* name, float* values, int numVector4s);
+	void SetMatrixArray(const char* name, float* values, int numMatrices);
+	void SetFloatArray(const char* name, float* value, int numElems);
 	bool SetTextureID(const char* name, int id);
 	void SetTexturePtr(const char* name, int id, void* nativeTexturePointer);
 	void SubmitUniforms(int uniformsIndex);
@@ -102,12 +117,11 @@ public:
 	void getproparray(const char* name, PropType type, float* value, int numFloats);
 	void getproparray_locked(const char* name, PropType type, float* value, int numFloats);
 	virtual void Draw(int uniformIndex);
-
 	virtual bool NeedsRender();
-
-
 	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
 	void SetComputeSource(const char* source, const char* entryPoint);
+
+	void DumpUniformsToFile(const char* filename, bool flatten);
 
 protected:
     virtual void _QueueCompileTasks(vector<CompileTask> tasks);
@@ -118,8 +132,8 @@ protected:
 
 	Stats _stats = {};
 
-	RenderAPI* _renderAPI;
-	int _id;
+	RenderAPI* _renderAPI = nullptr;
+	int _id = -1;
 
 	void ensureConstantBufferSize(size_t size, PropMap* oldProps = nullptr, PropMap* newProps = nullptr);
 	unsigned char* _constantBuffer = nullptr;
@@ -177,6 +191,13 @@ public:
 	LiveMaterial* CreateLiveMaterial();
 	bool DestroyLiveMaterial(int id);
 
+	enum Flags {
+		ShowWarnings = 1
+	};
+
+	bool showWarnings() const { return flags & ShowWarnings; }
+	void SetFlags(int flags);
+
 	LiveMaterial* GetLiveMaterialById(int id);
 	LiveMaterial* GetLiveMaterialByIdLocked(int id);
 
@@ -184,6 +205,7 @@ public:
 	mutex materialsMutex;
 
 protected:
+	int flags = 0;
     virtual bool supportsBackgroundCompiles();
 	virtual bool compileShader(CompileTask compileTask);
 

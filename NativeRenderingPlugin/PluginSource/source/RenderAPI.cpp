@@ -5,6 +5,17 @@
 #include <assert.h>
 #include <math.h>
 
+using std::endl;
+
+void writeTextToFile(const char* filename, const char* text) {
+    std::ofstream debugOut;
+    debugOut.open(filename);
+    debugOut << text;
+    debugOut.close();
+}
+
+
+
 const char* shaderTypeName(ShaderType shaderType) {
 	switch (shaderType) {
 	case Vertex: return "Vertex";
@@ -24,34 +35,48 @@ void LiveMaterial::SubmitUniforms(int uniformIndex) {
 	lock_guard<mutex> uniformsGuard(uniformsMutex);
 	lock_guard<mutex> gpuGuard(gpuMutex);
 	assert(uniformIndex < MAX_GPU_BUFFERS);
-	if (_gpuBuffer && _constantBuffer)
-		memcpy(_gpuBuffer + _constantBufferSize * uniformIndex, _constantBuffer, _constantBufferSize);
+	if (_gpuBuffer && _constantBuffer) {
+		unsigned char* dest = _gpuBuffer + _constantBufferSize * uniformIndex;
+#if false
+		for (auto iter = shaderProps.begin(); iter != shaderProps.end(); ++iter) {
+			auto name = iter->first;
+			auto prop = iter->second;
+			if (0 != memcmp(dest + prop->offset, _constantBuffer + prop->offset, prop->arraySize * prop->size))
+				DebugSS("Changed prop " << name);
+
+		}
+#endif
+		memcpy(dest, _constantBuffer, _constantBufferSize);
+	}
 }
 
-void LiveMaterial::setproparray(const char* name, PropType type, float* value, int numFloats) {
+void LiveMaterial::setproparray(const char* name, PropType type, float* value, int numElems) {
     lock_guard<mutex> guard(uniformsMutex);
 
-    if (!_constantBuffer) return;
+    if (!_constantBuffer || numElems < 1) return;
 
     auto prop = propForName(name, type);
     if (!prop) return;
     
-	size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, prop->size * prop->arraySize);
+	size_t bytesToCopy = prop->size * (int)fmin(numElems, prop->arraySize);
+	if (numElems > 1) {
+		//DebugSS("setproparray(" << name << ", " << propTypeStrings[type] << ", " << value << ", " << numElems << ") is copying " << bytesToCopy << " bytes.");
+	}
 	memcpy(_constantBuffer + prop->offset, value, bytesToCopy);
 }
 
-void LiveMaterial::getproparray(const char* name, PropType type, float* value, int numFloats) {
+void LiveMaterial::getproparray(const char* name, PropType type, float* value, int numElems) {
 	lock_guard<mutex> guard(uniformsMutex);
-	getproparray_locked(name, type, value, numFloats);
+	getproparray_locked(name, type, value, numElems);
 }
 
-void LiveMaterial::getproparray_locked(const char* name, PropType type, float* value, int numFloats) {
-    if (!_constantBuffer) return;
+void LiveMaterial::getproparray_locked(const char* name, PropType type, float* value, int numElems) {
+    if (!_constantBuffer || numElems < 1) return;
 
     auto prop = propForName(name, type);
     if (!prop) return;
     
-	size_t bytesToCopy = (size_t)fmin(sizeof(float) * numFloats, prop->size * prop->arraySize);
+	size_t bytesToCopy = prop->size * (int)fmin(numElems, prop->arraySize);
 	memcpy(value, _constantBuffer + prop->offset, bytesToCopy);
 }
 
@@ -63,11 +88,19 @@ bool LiveMaterial::NeedsRender()
 }
 
 void LiveMaterial::SetFloat(const char * name, float value) { setproparray(name, PropType::Float, &value, 1); }
-void LiveMaterial::SetVector4(const char * name, float* value) { setproparray(name, PropType::Vector4, value, 4); }
-void LiveMaterial::SetMatrix(const char * name, float * value) { setproparray(name, PropType::Matrix, value, 16); }
+void LiveMaterial::SetVector4(const char * name, float* value) { setproparray(name, PropType::Vector4, value, 1); }
+void LiveMaterial::SetMatrix(const char * name, float * value) { setproparray(name, PropType::Matrix, value, 1); }
 
 void LiveMaterial::SetFloatArray(const char * name, float * value, int numFloats) {
 	setproparray(name, PropType::FloatBlock, value, numFloats);
+}
+
+void LiveMaterial::SetVectorArray(const char* name, float* values, int numVector4s) {
+	setproparray(name, PropType::Vector4, values, numVector4s);
+}
+
+void LiveMaterial::SetMatrixArray(const char* name, float* values, int numMatrices) {
+	setproparray(name, PropType::Matrix, values, numMatrices);
 }
 
 bool LiveMaterial::SetTextureID(const char * name, int id)
@@ -107,8 +140,8 @@ void LiveMaterial::_SetTexture(const char* name, void* nativeTexturePointer) {
 }
 
 void LiveMaterial::GetFloat(const char * name, float* value) { getproparray(name, PropType::Float, value, 1); }
-void LiveMaterial::GetVector4(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 4); }
-void LiveMaterial::GetMatrix(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 16); }
+void LiveMaterial::GetVector4(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 1); }
+void LiveMaterial::GetMatrix(const char* name, float* value) { getproparray(name, PropType::Vector4, value, 1); }
 
 static ShaderProp* _lookupPropByName(const PropMap& props, const char* name) {
 	auto i = props.find(name);
@@ -121,6 +154,61 @@ void LiveMaterial::SetDepthWritesEnabled(bool enabled) {
 bool LiveMaterial::HasProperty(const char* name) {
 	lock_guard<mutex> guard(uniformsMutex);
 	return _lookupPropByName(shaderProps, name) != nullptr;
+}
+
+void LiveMaterial::DumpUniformsToFile(const char* filename, bool flatten) {
+	lock_guard<mutex> guard(uniformsMutex);
+    std::ofstream js(filename);
+    js << "{" << endl;
+    for (auto i = shaderProps.begin(); i != shaderProps.end(); ++i) {
+        auto prop = i->second;
+
+		if (prop->size == 0)
+			continue;
+
+		js << "    \"" << prop->name << "\": ";
+
+		float numFloats = (float)prop->size / (float)sizeof(float);
+		assert(abs(numFloats - (int)numFloats) < 0.001); // for now assume all things are floats
+
+		if (flatten) {
+			if (prop->arraySize > 1 || numFloats > 1)
+				js << "[";
+
+			bool first = true;
+			for (int a = 0; a < prop->arraySize; ++a) {
+				for (int f = 0; f < (int)numFloats; ++f) {
+					if (first) first = false;
+					else js << ", ";
+					js << *(float*)(_constantBuffer + prop->offset + f * sizeof(float) + a * prop->size);
+				}
+			}
+			if (prop->arraySize > 1 || numFloats > 1)
+				js << "]";
+		} else {
+			for (int a = 0; a < prop->arraySize; ++a) {
+				if (a == 0 && prop->arraySize >= 2) js << "[";
+
+				for (int f = 0; f < (int)numFloats; ++f) {
+					if (f == 0 && numFloats > 1) js << "[";
+					js << *(float*)(_constantBuffer + prop->offset + f * sizeof(float) + a * prop->size);
+					if (f != numFloats - 1) js << ", ";
+					if (f == ((int)numFloats) - 1 && numFloats > 1) js << "]";
+				}
+
+				if (prop->arraySize >= 2) js << (a < prop->arraySize - 1) ? ", " : "]";
+			}
+		}
+
+        auto nexti = i;
+        nexti++;
+        if (nexti != shaderProps.end())
+          js << ", ";
+
+        js << "\n";
+    }
+
+    js << "}" << endl;
 }
 
 ShaderProp * LiveMaterial::propForNameSizeOffset(const char * name, uint16_t size, uint16_t offset) {
@@ -218,7 +306,6 @@ LiveMaterial* RenderAPI::CreateLiveMaterial() {
 	auto id = liveMaterialCount;
 	assert(id > 0);
 	auto liveMaterial = _newLiveMaterial(id);
-    assert(liveMaterial->id() == id);
 	assert(liveMaterials.find(id) == liveMaterials.end());
 	liveMaterials[id] = liveMaterial;
 	return liveMaterial;
@@ -267,11 +354,11 @@ void LiveMaterial::SetShaderSource(
 		_stats.compileState = CompileState::Compiling;
 	}
 
-    _QueueCompileTasks(tasks);
+	_QueueCompileTasks(tasks);
 }
 
 void LiveMaterial::_QueueCompileTasks(vector<CompileTask> compileTasks) {
-    _renderAPI->QueueCompileTasks(compileTasks);
+	_renderAPI->QueueCompileTasks(compileTasks);
 }
 
 Stats LiveMaterial::GetStats() { return _stats; }
@@ -317,14 +404,14 @@ void LiveMaterial::SetComputeSource(
 static Queue<CompileTask> compileQueue;
 
 bool RenderAPI::supportsBackgroundCompiles() {
-    return true;
+	return true;
 }
 
 void RenderAPI::Initialize() {
-    if (supportsBackgroundCompiles()) {
-        thread compileThread(compileThreadFunc, this);
-        compileThread.detach();
-    }
+	if (supportsBackgroundCompiles()) {
+		thread compileThread(compileThreadFunc, this);
+		compileThread.detach();
+	}
 }
 
 RenderAPI::~RenderAPI() {
@@ -349,7 +436,7 @@ void RenderAPI::runCompileFunc() {
 	bool quitting = true;
 	while (quitting) {
 		auto compileTask = compileQueue.pop();
-		if (compileTask.quitting)
+		if (compileTask.quitting) // TODO: signal some other way
 			quitting = true;
 		else
 			compileShader(compileTask);
@@ -412,6 +499,8 @@ void RenderAPI::QueueCompileTasks(vector<CompileTask> tasks)
 	for (size_t i = 0; i < tasks.size(); ++i)
 		compileQueue.push(tasks[i]);
 }
+
+void RenderAPI::SetFlags(int flags) { this->flags = flags; }
 
 RenderAPI* CreateRenderAPI(UnityGfxRenderer apiType)
 {

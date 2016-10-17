@@ -1,13 +1,16 @@
-# Graphics Example Projects
+# LiveMaterial
 
-This is a collection of small graphics related example projects, served as an extension of [documentation](http://docs.unity3d.com/).
+A plugin allowing for updating .shader files live, even in standalone builds.
 
+## The problem
 
-### What license are the graphics samples shipped under?
+Unity's shader pipeline assumes you have all your .shader files written at build time. But what if you want to write code to generate .shader files dynamically? This works while the editor is running, but not in a standalone build.
 
-Just like with most other samples, the license is MIT/X11.
+## How it works
 
+LiveMaterial is a Unity rendering plugin that implements much of the same interface as Material, but accepts new shader text at runtime.
 
-### Overview of examples
+## Current limitations
 
-* [NativeRenderingPlugin](NativeRenderingPlugin) - C++ rendering plugin example, for the [native plugin interface manual](http://docs.unity3d.com/Manual/NativePluginInterface.html).
+- Hardcoded vertices assume you're only rendering a single full-screen quad, so it's not a generalized Material replacement (yet)
+- D3D11 and OpenGL ES/Core only
