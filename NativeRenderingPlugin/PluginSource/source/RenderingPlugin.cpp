@@ -168,6 +168,12 @@ extern "C" {
 		assert(GetLiveMaterialPtr(liveMaterial->id()));
 		liveMaterial->DumpUniformsToFile(filename, true);
 	}
+	void UNITY_FUNC ClearCompileCache() {
+		if (s_CurrentAPI)
+			s_CurrentAPI->ClearCompileCache();
+	}
+
+	bool UNITY_FUNC CanDraw(LiveMaterial* liveMaterial) { return liveMaterial->CanDraw(); }
 }
 
 mutex renderAPIMutex;

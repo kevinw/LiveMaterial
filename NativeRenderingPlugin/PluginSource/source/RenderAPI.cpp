@@ -103,6 +103,7 @@ void LiveMaterial::SetMatrixArray(const char* name, float* values, int numMatric
 	setproparray(name, PropType::Matrix, values, numMatrices);
 }
 
+
 bool LiveMaterial::SetTextureID(const char * name, int id)
 {
 	if (!id) {
@@ -316,6 +317,10 @@ LiveMaterial* RenderAPI::_newLiveMaterial(int id) {
 	return nullptr;
 }
 
+bool LiveMaterial::CanDraw() const {
+	return true;
+}
+
 static int inputId = 0;
 
 void LiveMaterial::SetShaderSource(
@@ -498,6 +503,9 @@ void RenderAPI::QueueCompileTasks(vector<CompileTask> tasks)
 {
 	for (size_t i = 0; i < tasks.size(); ++i)
 		compileQueue.push(tasks[i]);
+}
+
+void RenderAPI::ClearCompileCache() {
 }
 
 void RenderAPI::SetFlags(int flags) { this->flags = flags; }

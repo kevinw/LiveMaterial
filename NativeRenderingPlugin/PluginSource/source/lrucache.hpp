@@ -46,6 +46,11 @@ public:
 		return _cache_items_map.find(key);
 	}
 
+	void clear() {
+		_cache_items_list.clear();
+		_cache_items_map.clear();
+	}
+
 	const value_t& get(const key_t& key) {
 		auto it = _cache_items_map.find(key);
 		if (it == _cache_items_map.end()) {

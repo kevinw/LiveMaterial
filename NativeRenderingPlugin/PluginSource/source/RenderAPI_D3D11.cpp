@@ -82,6 +82,8 @@ public:
 	void QueueCompileOutput(CompileOutput& output);
 	virtual void SetDepthWritesEnabled(bool enabled);
 
+	virtual bool CanDraw() const;
+
 	virtual void Draw(int uniformIndex);
 	void DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex);
 
@@ -153,6 +155,10 @@ static int roundUp(int numToRound, int multiple) {
 	assert(multiple);
 	int isPositive = (int)(numToRound >= 0);
 	return ((numToRound + isPositive * (multiple - 1)) / multiple) * multiple;
+}
+
+bool LiveMaterial_D3D11::CanDraw() const {
+	return _pixelShader && _vertexShader;
 }
 
 bool LiveMaterial_D3D11::NeedsRender() {
@@ -382,6 +388,8 @@ public:
 	virtual LiveMaterial* _newLiveMaterial(int id);
 	virtual bool compileShader(CompileTask task);
 
+	virtual void ClearCompileCache();
+
 	ID3D11Device* D3D11Device() const { return m_Device; }
 
 private:
@@ -430,6 +438,11 @@ static void cacheOutput(const CompileTask& task, const CompileOutput& output) {
 	assert(!output.shaderBlob.empty());
 	auto hashValue = task.hash();
 	cachedShaderBlobs.put(hashValue, output.shaderBlob);
+}
+
+void RenderAPI_D3D11::ClearCompileCache() {
+	// TODO: not threadsafe; should only be used in debugging
+	cachedShaderBlobs.clear();
 }
 
 bool RenderAPI_D3D11::compileShader(CompileTask task)

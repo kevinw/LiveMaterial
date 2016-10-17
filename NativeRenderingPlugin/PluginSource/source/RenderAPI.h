@@ -123,6 +123,8 @@ public:
 
 	void DumpUniformsToFile(const char* filename, bool flatten);
 
+	virtual bool CanDraw() const;
+
 protected:
     virtual void _QueueCompileTasks(vector<CompileTask> tasks);
 
@@ -203,6 +205,8 @@ public:
 
 	virtual void QueueCompileTasks(vector<CompileTask> tasks);
 	mutex materialsMutex;
+
+	virtual void ClearCompileCache();
 
 protected:
 	int flags = 0;
