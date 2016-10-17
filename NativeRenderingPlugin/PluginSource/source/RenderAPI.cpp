@@ -218,6 +218,7 @@ LiveMaterial* RenderAPI::CreateLiveMaterial() {
 	auto id = liveMaterialCount;
 	assert(id > 0);
 	auto liveMaterial = _newLiveMaterial(id);
+    assert(liveMaterial->id() == id);
 	assert(liveMaterials.find(id) == liveMaterials.end());
 	liveMaterials[id] = liveMaterial;
 	return liveMaterial;
