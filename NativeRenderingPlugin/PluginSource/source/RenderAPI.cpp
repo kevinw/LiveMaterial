@@ -169,7 +169,7 @@ void LiveMaterial::DumpUniformsToFile(const char* filename, bool flatten) {
 		js << "    \"" << prop->name << "\": ";
 
 		float numFloats = (float)prop->size / (float)sizeof(float);
-		assert(abs(numFloats - (int)numFloats) < 0.001); // for now assume all things are floats
+		assert(fabs(numFloats - (float)(int)numFloats) < 0.001); // for now assume all things are floats
 
 		if (flatten) {
 			if (prop->arraySize > 1 || numFloats > 1)
@@ -196,7 +196,7 @@ void LiveMaterial::DumpUniformsToFile(const char* filename, bool flatten) {
 					if (f == ((int)numFloats) - 1 && numFloats > 1) js << "]";
 				}
 
-				if (prop->arraySize >= 2) js << (a < prop->arraySize - 1) ? ", " : "]";
+				if (prop->arraySize >= 2) js << ((a < prop->arraySize - 1) ? ", " : "]");
 			}
 		}
 
