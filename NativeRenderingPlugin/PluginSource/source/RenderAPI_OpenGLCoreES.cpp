@@ -22,6 +22,21 @@
 
 #define printOpenGLError() printOglError(__FILE__, __LINE__)
 
+static const char* myGLErrorString(GLenum error) {
+    switch (error) {
+        case GL_NO_ERROR: return nullptr;
+        case GL_INVALID_ENUM: return "An unacceptable value is specified for an enumerated argument. The offending command is ignored and has no other side effect than to set the error flag.";
+        case GL_INVALID_VALUE: return "A numeric argument is out of range. The offending command is ignored and has no other side effect than to set the error flag.";
+        case GL_INVALID_OPERATION: return "The specified operation is not allowed in the current state. The offending command is ignored and has no other side effect than to set the error flag.";
+        case GL_INVALID_FRAMEBUFFER_OPERATION: return "The framebuffer object is not complete. The offending command is ignored and has no other side effect than to set the error flag.";
+        case GL_OUT_OF_MEMORY: return "There is not enough memory left to execute the command. The state of the GL is undefined, except for the state of the error flags, after this error is recorded.";
+        case GL_STACK_UNDERFLOW: return "An attempt has been made to perform an operation that would cause an internal stack to underflow.";
+        case GL_STACK_OVERFLOW: return "An attempt has been made to perform an operation that would cause an internal stack to overflow.";
+        default:
+            return "Unrecognized glGetError error code";
+    }
+}
+
 int printOglError(const char *file, int line) {
     GLenum glErr = glGetError();
     if (glErr == GL_NO_ERROR)
@@ -31,7 +46,7 @@ int printOglError(const char *file, int line) {
     char buffer [SIZE];
 
     snprintf(buffer, SIZE, "glError in %s:%d: %s\n",
-           file, line, gluErrorString(glErr));
+           file, line, myGLErrorString(glErr));
     Debug(buffer);
     return 1;
 }
