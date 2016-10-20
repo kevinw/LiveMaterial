@@ -31,6 +31,10 @@ LiveMaterial::LiveMaterial(RenderAPI* renderAPI, int id)
 	, _id(id)
 {}
 
+void LiveMaterial::SetDrawingEnabled(bool enabled) {
+	_drawingEnabled = enabled;
+}
+
 void LiveMaterial::SubmitUniforms(int uniformIndex) {
 	lock_guard<mutex> uniformsGuard(uniformsMutex);
 	lock_guard<mutex> gpuGuard(gpuMutex);
@@ -137,6 +141,10 @@ void LiveMaterial::SetTexturePtr(const char * name, int id, void * nativeTexture
 }
 
 void LiveMaterial::_SetTexture(const char* name, void* nativeTexturePointer) {
+	assert(false);
+}
+
+void LiveMaterial::SetRenderTexture(void* nativeTexturePointer) {
 	assert(false);
 }
 
@@ -455,10 +463,6 @@ void RenderAPI::GetDebugInfo(int * numCompileTasks, int * numLiveMaterials)
 		lock_guard<mutex> guard(materialsMutex);
 		*numLiveMaterials = static_cast<int>(liveMaterials.size());
 	}
-}
-
-void RenderAPI::DrawMaterials(int uniformIndex)
-{
 }
 
 bool RenderAPI::compileShader(CompileTask task) {

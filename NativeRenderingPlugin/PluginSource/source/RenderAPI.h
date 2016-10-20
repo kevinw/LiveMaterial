@@ -97,6 +97,7 @@ public:
 	int id() const { return _id; }
 
 	Stats GetStats();
+	void SetDrawingEnabled(bool enabled);
 	void SetStats(Stats stats);
 	void GetFloat(const char* name, float* value);
 	void GetVector4(const char* name, float* value);
@@ -123,6 +124,7 @@ public:
 
 	void DumpUniformsToFile(const char* filename, bool flatten);
 
+	virtual void SetRenderTexture(void* nativeTexturePtr);
 	virtual bool CanDraw() const;
 
 protected:
@@ -136,6 +138,7 @@ protected:
 
 	RenderAPI* _renderAPI = nullptr;
 	int _id = -1;
+	bool _drawingEnabled = true;
 
 	void ensureConstantBufferSize(size_t size, PropMap* oldProps = nullptr, PropMap* newProps = nullptr);
 	unsigned char* _constantBuffer = nullptr;
@@ -168,7 +171,6 @@ public:
 	virtual ~RenderAPI();
 
 	void GetDebugInfo(int* numCompileTasks, int* numLiveMaterials);
-	virtual void DrawMaterials(int uniformIndex);
 
 	// Process general event like initialization, shutdown, device loss/reset etc.
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces) = 0;

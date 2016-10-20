@@ -61,6 +61,7 @@ public:
 		SAFE_RELEASE(_deviceConstantBuffer);
 		SAFE_RELEASE(_samplerState);
 		SAFE_RELEASE(_depthState);
+		SAFE_RELEASE(_renderTargetView);
 
 		{ // Cleanup textures
 			lock_guard<mutex> guard(texturesMutex);
@@ -69,7 +70,7 @@ public:
 			resourceViews.clear();
 
 			for (size_t i = 0; i < pendingResources.size(); ++i)
-				SAFE_RELEASE(pendingResources[i].first);
+				SAFE_RELEASE(pendingResources[i].resource);
 			pendingResources.clear();
 		}
 
@@ -91,6 +92,8 @@ public:
 
 	void updateD3D11Shader(CompileOutput output);
 	void constantBufferReflect(const string& shaderBlob);
+
+	virtual void SetRenderTexture(void* nativeTexturePtr);
 
 protected:
 	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
@@ -123,10 +126,24 @@ protected:
 	ID3D11ComputeShader* _computeShader = nullptr;
 	ID3D11SamplerState* _samplerState = nullptr;
 	ID3D11DepthStencilState* _depthState = nullptr;
+	ID3D11RenderTargetView* _renderTargetView = nullptr;
 
 	// Resource Views (textures)
 	vector<ID3D11ShaderResourceView*> resourceViews;
-	vector<std::pair<ID3D11Resource*, size_t> > pendingResources;
+
+	struct PendingResource {
+		PendingResource(ID3D11Resource* resource_, size_t index_, string name_)
+			: resource(resource_)
+			, index(index_)
+			, name(name_)
+		{}
+
+		ID3D11Resource* resource;
+		size_t index;
+		string name;
+	};
+
+	vector<PendingResource> pendingResources;
 	map<string, size_t> resourceViewIndexes;
 
 	// Compile outputs
@@ -176,16 +193,25 @@ void LiveMaterial_D3D11::_SetTexture(const char* name, void* nativeTexturePtr) {
 	lock_guard<mutex> guard(texturesMutex);
 
 	auto iter = resourceViewIndexes.find(name);
+
+	// Ignore if the texture doesn't have a slot in the shader.
 	if (iter == resourceViewIndexes.end())
 		return;
 
+	// Increment the texture's reference count; we'll use it later on the render thread.
 	auto index = iter->second;
 	assert(index < resourceViews.size());
 	auto resource = (ID3D11Resource*)nativeTexturePtr;
 	resource->AddRef();
 
-	pendingResources.push_back(std::pair<ID3D11Resource*, size_t>(resource, index));
+	pendingResources.push_back(PendingResource(resource, index, name));
+}
 
+void LiveMaterial_D3D11::SetRenderTexture(void* nativeTexturePtr) {
+	lock_guard<mutex> guard(texturesMutex);
+	auto resource = (ID3D11Resource*)nativeTexturePtr;
+	if (resource) resource->AddRef();
+	pendingResources.push_back(PendingResource(resource, -1, ""));
 }
 
 void LiveMaterial_D3D11::QueueCompileOutput(CompileOutput& output) {
@@ -373,14 +399,11 @@ class RenderAPI_D3D11 : public RenderAPI
 {
 public:
 	RenderAPI_D3D11();
-	virtual ~RenderAPI_D3D11() {
-	}
+	virtual ~RenderAPI_D3D11() {}
 
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces);
 
 	virtual void DrawSimpleTriangles(const float worldMatrix[16], int triangleCount, const void* verticesFloat3Byte4);
-
-	virtual void DrawMaterials(int uniformIndex);
 
 	virtual void* BeginModifyTexture(void* textureHandle, int textureWidth, int textureHeight, int* outRowPitch);
 	virtual void EndModifyTexture(void* textureHandle, int textureWidth, int textureHeight, int rowPitch, void* dataPtr);
@@ -662,11 +685,11 @@ void RenderAPI_D3D11::CreateResources()
 	bdesc.RenderTarget[0].BlendEnable = FALSE;
 	bdesc.RenderTarget[0].RenderTargetWriteMask = 0xF;
 	m_Device->CreateBlendState(&bdesc, &m_BlendState);
+
 }
 
 
-void RenderAPI_D3D11::ReleaseResources()
-{
+void RenderAPI_D3D11::ReleaseResources() {
 	SAFE_RELEASE(m_VB);
 	SAFE_RELEASE(m_CB);
 	SAFE_RELEASE(m_VertexShader);
@@ -678,8 +701,7 @@ void RenderAPI_D3D11::ReleaseResources()
 }
 
 
-void RenderAPI_D3D11::DrawSimpleTriangles(const float worldMatrix[16], int triangleCount, const void* verticesFloat3Byte4)
-{
+void RenderAPI_D3D11::DrawSimpleTriangles(const float worldMatrix[16], int triangleCount, const void* verticesFloat3Byte4) {
 	ID3D11DeviceContext* ctx = NULL;
 	m_Device->GetImmediateContext(&ctx);
 
@@ -737,19 +759,6 @@ void RenderAPI_D3D11::EndModifyTexture(void* textureHandle, int textureWidth, in
 	}
 }
 
-void RenderAPI_D3D11::DrawMaterials(int uniformIndex) {
-	ID3D11DeviceContext* ctx = nullptr;
-	D3D11Device()->GetImmediateContext (&ctx);
-	if (ctx) {
-		lock_guard<mutex> guard(materialsMutex);
-		for (auto iter = liveMaterials.begin(); iter != liveMaterials.end(); ++iter) {
-			auto liveMaterial = iter->second;
-			((LiveMaterial_D3D11*)liveMaterial)->DrawD3D11(ctx, uniformIndex);
-		}
-		ctx->Release();
-	}
-}
-
 void LiveMaterial_D3D11::Draw(int uniformIndex) {
 	ID3D11DeviceContext* ctx = nullptr;
 	device()->GetImmediateContext(&ctx);
@@ -765,31 +774,72 @@ ID3D11Device* LiveMaterial_D3D11::device() const {
 }
 
 void LiveMaterial_D3D11::setupPendingResources(ID3D11DeviceContext* ctx) {
-	lock_guard<mutex> guard(texturesMutex);
 
 	for (size_t i = 0; i < pendingResources.size(); ++i) {
-		auto resource = pendingResources[i].first;
-		auto index = pendingResources[i].second;
+		auto resource = pendingResources[i].resource;
+		auto index = pendingResources[i].index;
+		auto name = pendingResources[i].name;
 
-		auto resourceView = resourceViews[index];
+		if (index == -1) {
+			assert(name == "");
+			if (resource == nullptr) {
+				SAFE_RELEASE(_renderTargetView);
+			} else {
+				ID3D11RenderTargetView* renderTargetView = nullptr;
 
-		if (resourceView != nullptr) {
-			SAFE_RELEASE(resourceView);
-			resourceView = nullptr;
+				D3D11_RESOURCE_DIMENSION resourceDimension;
+				resource->GetType(&resourceDimension);
+				switch (resourceDimension) {
+				case D3D10_RESOURCE_DIMENSION_UNKNOWN: { Debug("unknown"); break; }
+				case D3D11_RESOURCE_DIMENSION_BUFFER: { Debug("Resource is a buffer."); break; }
+				case D3D11_RESOURCE_DIMENSION_TEXTURE1D: { Debug("Resource is a 1D texture."); break; }
+				case D3D11_RESOURCE_DIMENSION_TEXTURE2D: { Debug("Resource is a 2D texture."); break; }
+				case D3D11_RESOURCE_DIMENSION_TEXTURE3D: { Debug("Resource is a 3D texture."); break;  }
+				default: assert(false);
+				}
+
+				ID3D11Texture2D* tex2d = nullptr;
+				if (!FAILED(resource->QueryInterface(IID_ID3D11Texture2D, (void**)&tex2d))) {
+					assert(tex2d);
+					D3D11_TEXTURE2D_DESC textureDesc;
+					tex2d->GetDesc(&textureDesc);
+
+					DebugSS("render texture size: " << textureDesc.Width << "x" << textureDesc.Height);
+
+					D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
+					renderTargetViewDesc.Format = textureDesc.Format;
+					renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+					renderTargetViewDesc.Texture2D.MipSlice = 0;
+
+					if (FAILED(device()->CreateRenderTargetView(tex2d, &renderTargetViewDesc, &_renderTargetView))) {
+						Debug("failed creating render target view");
+					}
+				}
+			}
 		}
+		else {
+			auto resourceView = resourceViews[index];
 
-		if (resource) {
-			HRESULT hr = device()->CreateShaderResourceView(resource, nullptr, &resourceView);
-			if (FAILED(hr)) {
-				Debug("Could not CreateShaderResourceView");
-				DebugHR(hr);
+			if (resourceView != nullptr) {
+				SAFE_RELEASE(resourceView);
 				resourceView = nullptr;
 			}
 
-			SAFE_RELEASE(resource);
+			if (resource) {
+				{
+					HRESULT hr = device()->CreateShaderResourceView(resource, nullptr, &resourceView);
+					if (FAILED(hr)) {
+						Debug("Could not CreateShaderResourceView");
+						DebugHR(hr);
+						resourceView = nullptr;
+					}
+				}
+			}
+
+			resourceViews[index] = resourceView;
 		}
 
-		resourceViews[index] = resourceView;
+		SAFE_RELEASE(resource);
 	}
 
 	pendingResources.clear();
@@ -807,8 +857,6 @@ void LiveMaterial_D3D11::setupPendingResources(ID3D11DeviceContext* ctx) {
 }
 
 void LiveMaterial_D3D11::updateUniforms(ID3D11DeviceContext* ctx, int uniformIndex) {
-	lock_guard<mutex> uniformsGuard(uniformsMutex);
-	lock_guard<mutex> gpuGuard(gpuMutex);
 
 	assert(uniformIndex < MAX_GPU_BUFFERS);
 	if (_deviceConstantBuffer && _deviceConstantBufferSize > 0) {
@@ -831,13 +879,37 @@ void LiveMaterial_D3D11::DrawD3D11(ID3D11DeviceContext* ctx, int uniformIndex) {
 	for (size_t i = 0; i < outputs.size(); ++i)
 		updateD3D11Shader(outputs[i]);
 	
-	if (_pixelShader && _vertexShader) {
-		setupPendingResources(ctx);
-		updateUniforms(ctx, uniformIndex);	
+	if (_drawingEnabled && _pixelShader && _vertexShader) {
+		{
+			lock_guard<mutex> guard(texturesMutex);
+			setupPendingResources(ctx);
+		}
+
+		{
+			lock_guard<mutex> uniformsGuard(uniformsMutex);
+			lock_guard<mutex> gpuGuard(gpuMutex);
+			updateUniforms(ctx, uniformIndex);
+
+		}
+
 		ctx->VSSetShader (_vertexShader, NULL, 0);		
 		ctx->PSSetShader (_pixelShader, NULL, 0);
 		ctx->PSSetConstantBuffers(0, 1, &_deviceConstantBuffer);
 		ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+		if (_renderTargetView) {
+			ID3D11RenderTargetView* oldRenderTargetView = nullptr;
+			ID3D11DepthStencilView* oldDepthStencilView = nullptr;
+			ctx->OMGetRenderTargets(1, &oldRenderTargetView, &oldDepthStencilView);
+
+			DebugSS("old render target " << oldRenderTargetView);
+
+			ctx->OMSetRenderTargets(1, &_renderTargetView, oldDepthStencilView);
+			ctx->Draw(4, 0);
+
+			ctx->OMSetRenderTargets(1, &oldRenderTargetView, oldDepthStencilView);
+		}
+
 		ctx->Draw(4, 0);
 	}
 	else {
