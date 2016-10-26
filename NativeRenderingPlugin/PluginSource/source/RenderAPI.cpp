@@ -370,8 +370,27 @@ void LiveMaterial::SetShaderSource(
 	_QueueCompileTasks(tasks);
 }
 
+
 void LiveMaterial::_QueueCompileTasks(vector<CompileTask> compileTasks) {
 	_renderAPI->QueueCompileTasks(compileTasks);
+}
+
+void LiveMaterial::SetMesh(int vertexCount, float* vertices, float* normals, float* uvs) {
+	mesh.resize(vertexCount);
+	for (int i = 0; i < vertexCount; ++i) {
+		MeshVertex& v = mesh[i];
+		v.pos[0] = vertices[0];
+		v.pos[1] = vertices[1];
+		v.pos[2] = vertices[2];
+		v.normal[0] = normals[0];
+		v.normal[1] = normals[1];
+		v.normal[2] = normals[2];
+		v.uv[0] = uvs[0];
+		v.uv[1] = uvs[1];
+		vertices += 3;
+		normals += 3;
+		uvs += 2;
+	}
 }
 
 Stats LiveMaterial::GetStats() { return _stats; }

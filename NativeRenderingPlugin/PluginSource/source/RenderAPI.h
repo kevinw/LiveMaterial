@@ -121,6 +121,7 @@ public:
 	virtual bool NeedsRender();
 	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
 	void SetComputeSource(const char* source, const char* entryPoint);
+	void SetMesh(int vertexCount, float* vertices, float* normals, float* uvs);
 
 	void DumpUniformsToFile(const char* filename, bool flatten);
 
@@ -133,6 +134,15 @@ protected:
 	ShaderProp* propForNameSizeOffset(const char* name, uint16_t size, uint16_t offset);
 	ShaderProp* propForName(const char* name, PropType type);
 	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
+
+	struct MeshVertex
+	{
+		float pos[3];
+		float normal[3];
+		float uv[2];
+	};
+
+	vector<MeshVertex> mesh;
 
 	Stats _stats = {};
 

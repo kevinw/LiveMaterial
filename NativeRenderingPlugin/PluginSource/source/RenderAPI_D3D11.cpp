@@ -347,6 +347,10 @@ void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 	assert(!output.shaderBlob.empty());
 	if (output.shaderType == Fragment || output.shaderType == Compute)
 		constantBufferReflect(output.shaderBlob);
+	else if (output.shaderType == Vertex) {
+
+	}
+
 
 	auto buf = output.shaderBlob.data();
 	auto bufSize = output.shaderBlob.size();
