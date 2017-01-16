@@ -97,6 +97,7 @@ public:
 	int id() const { return _id; }
 
 	Stats GetStats();
+	void SetDrawingEnabled(bool enabled);
 	void SetStats(Stats stats);
 	void GetFloat(const char* name, float* value);
 	void GetVector4(const char* name, float* value);
@@ -120,9 +121,11 @@ public:
 	virtual bool NeedsRender();
 	void SetShaderSource(const char* fragSrc, const char* fragEntry, const char* vertSrc, const char* vertEntry);
 	void SetComputeSource(const char* source, const char* entryPoint);
+	void SetMesh(int vertexCount, float* vertices, float* normals, float* uvs);
 
 	void DumpUniformsToFile(const char* filename, bool flatten);
 
+	virtual void SetRenderTexture(void* nativeTexturePtr);
 	virtual bool CanDraw() const;
 
 protected:
@@ -132,10 +135,20 @@ protected:
 	ShaderProp* propForName(const char* name, PropType type);
 	virtual void _SetTexture(const char* name, void* nativeTexturePtr);
 
+	struct MeshVertex
+	{
+		float pos[3];
+		float normal[3];
+		float uv[2];
+	};
+
+	vector<MeshVertex> mesh;
+
 	Stats _stats = {};
 
 	RenderAPI* _renderAPI = nullptr;
 	int _id = -1;
+	bool _drawingEnabled = true;
 
 	void ensureConstantBufferSize(size_t size, PropMap* oldProps = nullptr, PropMap* newProps = nullptr);
 	unsigned char* _constantBuffer = nullptr;
@@ -168,7 +181,6 @@ public:
 	virtual ~RenderAPI();
 
 	void GetDebugInfo(int* numCompileTasks, int* numLiveMaterials);
-	virtual void DrawMaterials(int uniformIndex);
 
 	// Process general event like initialization, shutdown, device loss/reset etc.
 	virtual void ProcessDeviceEvent(UnityGfxDeviceEventType type, IUnityInterfaces* interfaces) = 0;

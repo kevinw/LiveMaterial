@@ -31,6 +31,10 @@ LiveMaterial::LiveMaterial(RenderAPI* renderAPI, int id)
 	, _id(id)
 {}
 
+void LiveMaterial::SetDrawingEnabled(bool enabled) {
+	_drawingEnabled = enabled;
+}
+
 void LiveMaterial::SubmitUniforms(int uniformIndex) {
 	lock_guard<mutex> uniformsGuard(uniformsMutex);
 	lock_guard<mutex> gpuGuard(gpuMutex);
@@ -137,6 +141,10 @@ void LiveMaterial::SetTexturePtr(const char * name, int id, void * nativeTexture
 }
 
 void LiveMaterial::_SetTexture(const char* name, void* nativeTexturePointer) {
+	assert(false);
+}
+
+void LiveMaterial::SetRenderTexture(void* nativeTexturePointer) {
 	assert(false);
 }
 
@@ -366,8 +374,27 @@ void LiveMaterial::SetShaderSource(
 	_QueueCompileTasks(tasks);
 }
 
+
 void LiveMaterial::_QueueCompileTasks(vector<CompileTask> compileTasks) {
 	_renderAPI->QueueCompileTasks(compileTasks);
+}
+
+void LiveMaterial::SetMesh(int vertexCount, float* vertices, float* normals, float* uvs) {
+	mesh.resize(vertexCount);
+	for (int i = 0; i < vertexCount; ++i) {
+		MeshVertex& v = mesh[i];
+		v.pos[0] = vertices[0];
+		v.pos[1] = vertices[1];
+		v.pos[2] = vertices[2];
+		v.normal[0] = normals[0];
+		v.normal[1] = normals[1];
+		v.normal[2] = normals[2];
+		v.uv[0] = uvs[0];
+		v.uv[1] = uvs[1];
+		vertices += 3;
+		normals += 3;
+		uvs += 2;
+	}
 }
 
 Stats LiveMaterial::GetStats() { return _stats; }
@@ -463,10 +490,6 @@ void RenderAPI::GetDebugInfo(int * numCompileTasks, int * numLiveMaterials)
 		lock_guard<mutex> guard(materialsMutex);
 		*numLiveMaterials = static_cast<int>(liveMaterials.size());
 	}
-}
-
-void RenderAPI::DrawMaterials(int uniformIndex)
-{
 }
 
 bool RenderAPI::compileShader(CompileTask task) {

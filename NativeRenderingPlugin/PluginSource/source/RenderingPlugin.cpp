@@ -134,6 +134,7 @@ extern "C" {
 	NativePtr UNITY_FUNC GetLiveMaterialPtr(int id) { return s_CurrentAPI ? s_CurrentAPI->GetLiveMaterialById(id) : nullptr; }
 	void UNITY_FUNC DestroyLiveMaterial(int id) { if (s_CurrentAPI) s_CurrentAPI->DestroyLiveMaterial(id); }
     Stats UNITY_FUNC GetStats(LiveMaterial* liveMaterial) { return liveMaterial->GetStats(); }
+	void UNITY_FUNC SetDrawingEnabled(LiveMaterial* liveMaterial, bool enabled) { return liveMaterial->SetDrawingEnabled(enabled);  }
 	void UNITY_FUNC SetStats(LiveMaterial* liveMaterial, Stats stats) { return liveMaterial->SetStats(stats); }
 	bool UNITY_FUNC HasProperty(LiveMaterial* liveMaterial, const char* name) { return liveMaterial->HasProperty(name); }
 	bool UNITY_FUNC NeedsRender(LiveMaterial* liveMaterial) { return liveMaterial->NeedsRender(); }
@@ -142,6 +143,7 @@ extern "C" {
 	void UNITY_FUNC SubmitUniforms(LiveMaterial* liveMaterial, int uniformsIndex) { liveMaterial->SubmitUniforms(uniformsIndex); }
 	bool UNITY_FUNC SetTextureID(LiveMaterial* liveMaterial, const char* name, int id) { return liveMaterial->SetTextureID(name, id); }
 	void UNITY_FUNC SetTexturePtr(LiveMaterial* liveMaterial, const char* name, int id, void* nativeTexturePointer) { return liveMaterial->SetTexturePtr(name, id, nativeTexturePointer); }
+	void UNITY_FUNC SetRenderTexture(LiveMaterial* liveMaterial, void* nativeTexturePointer) { return liveMaterial->SetRenderTexture(nativeTexturePointer); }
 	void UNITY_FUNC SetFloat(LiveMaterial* liveMaterial, const char* name, float value) { liveMaterial->SetFloat(name, value); }
 	void UNITY_FUNC SetVector4(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetVector4(name, value); }
 	void UNITY_FUNC SetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->SetMatrix(name, value); }
@@ -150,6 +152,7 @@ extern "C" {
 	void UNITY_FUNC SetMatrixArray(LiveMaterial* liveMaterial, const char* name, float* values, int numMatrices) { liveMaterial->SetMatrixArray(name, values, numMatrices); }
 	void UNITY_FUNC GetVector4(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->GetVector4(name, value); }
 	void UNITY_FUNC GetMatrix(LiveMaterial* liveMaterial, const char* name, float* value) { liveMaterial->GetMatrix(name, value); }
+	void UNITY_FUNC SetMesh(LiveMaterial* liveMaterial, int vertexCount, float* vertices, float* normals, float* uvs) { liveMaterial->SetMesh(vertexCount, vertices, normals, uvs); }
 	float UNITY_FUNC GetFloat(LiveMaterial* liveMaterial, const char* name) {
 		float value = 0;
 		liveMaterial->GetFloat(name, &value);
