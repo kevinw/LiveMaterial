@@ -347,16 +347,6 @@ void LiveMaterial_D3D11::updateD3D11Shader(CompileOutput output)
 	assert(!output.shaderBlob.empty());
 	if (output.shaderType == Fragment || output.shaderType == Compute)
 		constantBufferReflect(output.shaderBlob);
-	else if (output.shaderType == Vertex) {
-		D3D11_INPUT_ELEMENT_DESC s_DX11InputElementDesc[] =
-		{
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-			{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-			{ "TEXCOORD", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		};
-		m_Device->CreateInputLayout(s_DX11InputElementDesc, 2, kVertexShaderCode, sizeof(kVertexShaderCode), &m_InputLayout);
-	}
-
 
 	auto buf = output.shaderBlob.data();
 	auto bufSize = output.shaderBlob.size();
