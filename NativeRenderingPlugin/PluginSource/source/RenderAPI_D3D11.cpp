@@ -445,6 +445,8 @@ void RenderAPI_D3D11::ClearCompileCache() {
 	cachedShaderBlobs.clear();
 }
 
+static int compileCount = 0;
+
 bool RenderAPI_D3D11::compileShader(CompileTask task)
 {
 	CompileOutput output;
@@ -462,9 +464,9 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 		if (optimizationLevel == 3) flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
 		else DebugSS("Unknown optimization level " << optimizationLevel);
 		*/
-		flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+		flags |= D3DCOMPILE_OPTIMIZATION_LEVEL0;
 		//if (shaderDebugging) {
-			//flags |= D3DCOMPILE_DEBUG;
+			flags |= D3DCOMPILE_DEBUG;
 		//}
 		auto profile = profileNameForShaderType(task.shaderType);
 		if (!profile) {
@@ -477,9 +479,15 @@ bool RenderAPI_D3D11::compileShader(CompileTask task)
 			ID3DBlob *shaderBlob = nullptr;
 			ID3DBlob* errorBlob = nullptr;
 
+			int currentCount = ++compileCount;
+
+			DebugSS("Starting compile " << currentCount);
+
 			HRESULT hr = D3DCompile(
 				task.src.data(), task.src.size(), task.filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
 				task.entryPoint.c_str(), profile, flags, 0, &shaderBlob, &errorBlob);
+
+			DebugSS("..finished compile " << currentCount);
 
 			string errstr;
 			if (errorBlob)

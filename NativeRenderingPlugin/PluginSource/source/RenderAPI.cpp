@@ -356,7 +356,11 @@ void LiveMaterial::SetShaderSource(
 	}
 
 	if (tasks.size() > 0) {
+		Debug("setting state to Compiling");
 		_stats.compileState = CompileState::Compiling;
+	}
+	else {
+		Debug("WARNING: no tasks in SetShaderSource");
 	}
 
 	_QueueCompileTasks(tasks);
@@ -439,13 +443,17 @@ RenderAPI::~RenderAPI() {
 
 void RenderAPI::runCompileFunc() {
 	bool quitting = true;
+	Debug("COMPILE THREAD STARTING");
 	while (quitting) {
+		Debug("compile thread waiting on queue");
 		auto compileTask = compileQueue.pop();
+		Debug("compile thread popped an entry");
 		if (compileTask.quitting) // TODO: signal some other way
 			quitting = true;
 		else
 			compileShader(compileTask);
 	}
+	Debug("COMPILE THREAD FINISHED");
 }
 
 void RenderAPI::GetDebugInfo(int * numCompileTasks, int * numLiveMaterials)
